@@ -87,12 +87,12 @@
 #define KEY_GESTURE_M		KEY_M
 #define KEY_GESTURE_L		KEY_L
 /*asus use*/
-#define KEY_GESTURE_V		KEY_V
-#define KEY_GESTURE_Z		KEY_Z
-#define KEY_GESTURE_C		KEY_C
-#define KEY_GESTURE_E		KEY_E
-#define KEY_GESTURE_S		KEY_S
-#define KEY_GESTURE_W		KEY_W
+#define KEY_GESTURE_V		260
+#define KEY_GESTURE_Z		262
+#define KEY_GESTURE_C		257
+#define KEY_GESTURE_E		258
+#define KEY_GESTURE_S		259
+#define KEY_GESTURE_W		261
 /*asus use*/
 
 #define GESTURE_DOUBLECLICK	0x24
