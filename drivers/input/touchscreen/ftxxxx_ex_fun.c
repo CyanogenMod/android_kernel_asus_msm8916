@@ -493,6 +493,8 @@ int fts_ctpm_fw_upgrade_with_i_file(struct i2c_client *client)
 				
 			}
 			#endif
+
+			break;
 	}
 	fw_len = CTPM_FW_length;
 
@@ -726,6 +728,8 @@ int fts_ctpm_auto_upgrade(struct i2c_client *client)
 				}
 			}
 			#endif
+
+			break;
 	}
 //	printk(KERN_WARNING"hjptest--->here will judge wether to update the firmware\n");
 	ftxxxx_read_reg(client, FTXXXX_REG_FW_VER, &uc_tp_fm_ver);
