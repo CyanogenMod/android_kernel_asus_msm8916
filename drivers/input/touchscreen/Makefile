@@ -3,14 +3,16 @@
 #
 
 # Each configuration option enables a list of files.
-ifeq ($(TARGET_PRODUCT),Z00L)
+ifeq ($(CONFIG_TOUCHSCREEN_Z00L),y)
 EXTRA_CFLAGS	+= -DZE550KL_HD
 EXTRA_CFLAGS	+= -DZE600KL_HD
 endif
-ifeq ($(TARGET_PRODUCT),Z00T)
+
+ifeq ($(CONFIG_TOUCHSCREEN_Z00T),y)
 EXTRA_CFLAGS	+= -DZE551KL_FHD
 EXTRA_CFLAGS	+= -DZE601KL_FHD
 endif
+
 wm97xx-ts-y := wm97xx-core.o
 
 obj-$(CONFIG_TOUCHSCREEN_88PM860X)	+= 88pm860x-ts.o

@@ -11,6 +11,12 @@ menuconfig INPUT_TOUCHSCREEN
 
 if INPUT_TOUCHSCREEN
 
+config TOUCHSCREEN_Z00L
+	tristate "Enable Z00L touchscreen support"
+
+config TOUCHSCREEN_Z00T
+	tristate "Enable Z00T touchscreen support"
+
 source "drivers/input/touchscreen/synaptics_dsx/Kconfig"
 
 config TOUCHSCREEN_88PM860X
