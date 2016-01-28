@@ -1305,7 +1305,7 @@ static ssize_t switch_glove_mode_store(struct device *dev, struct device_attribu
 static ssize_t switch_glove_mode_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 
-	return sprintf(buf, "%d \n", ftxxxx_ts->glove_mode_eable);
+	return sprintf(buf, "%d\n", ftxxxx_ts->glove_mode_eable);
 }
 
 static ssize_t switch_dclick_mode_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
@@ -1334,7 +1334,7 @@ static ssize_t switch_dclick_mode_store(struct device *dev, struct device_attrib
 static ssize_t switch_dclick_mode_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 
-	return sprintf(buf, "%d \n", ftxxxx_ts->dclick_mode_eable);
+	return sprintf(buf, "%d\n", ftxxxx_ts->dclick_mode_eable);
 }
 
 static ssize_t switch_gesture_mode_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
@@ -1425,16 +1425,16 @@ static ssize_t switch_gesture_mode_show(struct device *dev, struct device_attrib
 	tmp = (ftxxxx_ts->gesture_mode_type >> 6) & 1;
 
 	if (!tmp)
-		return sprintf(buf, "%x \n", tmp);
+		return sprintf(buf, "%x\n", tmp);
 	else
-		return sprintf(buf, "%x \n", ftxxxx_ts->gesture_mode_type);
+		return sprintf(buf, "%x\n", ftxxxx_ts->gesture_mode_type);
 
 }
 
 #ifdef ASUS_FACTORY_BUILD
 static ssize_t flip_cover_mode_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d \n", 0);
+	return sprintf(buf, "%d\n", 0);
 }
 
 static ssize_t flip_cover_mode_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
@@ -1445,7 +1445,7 @@ static ssize_t flip_cover_mode_store(struct device *dev, struct device_attribute
 #else
 static ssize_t flip_cover_mode_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d \n", ftxxxx_ts->cover_mode_states);
+	return sprintf(buf, "%d\n", ftxxxx_ts->cover_mode_states);
 }
 
 static ssize_t flip_cover_mode_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
@@ -1510,7 +1510,7 @@ static ssize_t irq_disable_store(struct device *dev, struct device_attribute *at
 static ssize_t irq_disable_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 
-	return sprintf(buf, "%d \n", FOCAL_IRQ_DISABLE);
+	return sprintf(buf, "%d\n", FOCAL_IRQ_DISABLE);
 }
 
 static ssize_t ftxxxx_init_show(struct device *dev, struct device_attribute *attr, char *buf)
