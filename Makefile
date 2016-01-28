@@ -702,19 +702,7 @@ ifeq ("$(FACTORY)", "1")
 KBUILD_CPPFLAGS += -DASUS_FACTORY_BUILD=1
 endif
 
-#ifeq ($(TARGET_BUILD_VARIANT), user)
 KBUILD_CPPFLAGS += -DASUS_SHIP_BUILD=1
-#endif
-
-# ASUS-danielchan20150603 ASUS_SENSOR_ENG_CMD >>>>>>>>>+
-ifeq ($(TARGET_BUILD_VARIANT), userdebug)
-KBUILD_CFLAGS += -DCONFIG_ASUS_SENSOR_ENG_CMD
-endif
-
-ifeq ($(TARGET_BUILD_VARIANT), eng)
-KBUILD_CFLAGS += -DCONFIG_ASUS_SENSOR_ENG_CMD
-endif
-# ASUS-danielchan20150603 ASUS_SENSOR_ENG_CMD <<<<<<<<<<+
 
 # Use --build-id when available.
 LDFLAGS_BUILD_ID = $(patsubst -Wl$(comma)%,%,\
