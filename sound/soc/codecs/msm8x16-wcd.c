@@ -4199,7 +4199,6 @@ static ssize_t audio_debug_proc_write(struct file *filp, const char __user *buff
     if(strncmp(messages, "1", 1) == 0){
         if(!g_DebugMode){
             gpio_direction_output(g_gpio_audio_debug, 0); /* enable uart log, disable audio */
-            wcd_plug_detection_for_audio_debug(&g_msm8x16_wcd_priv->mbhc,1);
             g_DebugMode = 1;
         }
         printk("[Audio][Debug] Debug mode!!\n");
@@ -4207,7 +4206,6 @@ static ssize_t audio_debug_proc_write(struct file *filp, const char __user *buff
         if(g_DebugMode){
             gpio_direction_output(g_gpio_audio_debug, 1); /* disable uart log, enable audio */
             g_DebugMode = 0;
-            wcd_plug_detection_for_audio_debug(&g_msm8x16_wcd_priv->mbhc,0);
         }
         printk("[Audio][Debug] Audio mode!!\n");
     }else if(strncmp(messages, "write", strlen("write")) == 0){
@@ -4216,18 +4214,6 @@ static ssize_t audio_debug_proc_write(struct file *filp, const char __user *buff
         snd_soc_write(registered_codec, reg, value);
         value = snd_soc_read(registered_codec, reg);
         printk("[Audio][codec] write register reg[0x%x]=[0x%x]\n", reg, value);
-#ifdef ASUS_FACTORY_BUILD
-    }else if(strncmp(messages, "2", 1) == 0){
-        if(!g_DebugMode){
-            wcd_disable_button_event_for_factory(&g_msm8x16_wcd_priv->mbhc,1);
-        }
-        printk("[Audio][Button]Disable Button press for test!\n");
-    }else if(strncmp(messages, "3", 1) == 0){
-        if(!g_DebugMode){
-            wcd_disable_button_event_for_factory(&g_msm8x16_wcd_priv->mbhc,0);
-        }
-        printk("[Audio][Button]Enable Button press for test!\n");
-#endif
     }
 
     deinitKernelEnv();
