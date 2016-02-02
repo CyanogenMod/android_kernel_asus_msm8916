@@ -17,7 +17,7 @@
 /*#define DEBUG*/
 /*#define VERBOSE_DEBUG*/
 
-#include <linux/akm09911.h>
+#include <linux/input/akm09911.h>
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/freezer.h>
@@ -30,33 +30,33 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <linux/of.h>
+#include <linux/of_gpio.h>
+#include <linux/proc_fs.h>
 #include <linux/workqueue.h>
 #include <linux/regulator/consumer.h>
-#include <linux/of_gpio.h>
-#include <linux/sensors.h>
 
-#define AKM_DEBUG_IF			0
+#define AKM_DEBUG_IF			1
 #define AKM_HAS_RESET			1
 #define AKM_INPUT_DEVICE_NAME	"compass"
 #define AKM_DRDY_TIMEOUT_MS		100
 #define AKM_BASE_NUM			10
-
-#define AKM_IS_MAG_DATA_ENABLED() (akm->enable_flag & (1 << MAG_DATA_FLAG))
-
+#define AKM_DEBUG_MESSAGE		1
+#define AKM_ATTR_ATD_TEST		1
+//<ASUS-annacheng20150129>>>>>>>>>>>>
+#define Driverversion  "1.0.0"  
+#define VENDOR  "AK09911"    
+struct proc_dir_entry *compasssensor_entry=NULL;
+//<ASUS-annacheng20150129><<<<<<<<<<<<+
 /* POWER SUPPLY VOLTAGE RANGE */
 #define AKM09911_VDD_MIN_UV	2000000
 #define AKM09911_VDD_MAX_UV	3300000
 #define AKM09911_VIO_MIN_UV	1750000
 #define AKM09911_VIO_MAX_UV	1950000
-
-#define STATUS_ERROR(st)		(((st)&0x08) != 0x0)
-
-/* Save last device state for power down */
 struct akm_sensor_state {
 	bool power_on;
 	uint8_t mode;
 };
-
 struct akm_compass_data {
 	struct i2c_client	*i2c;
 	struct input_dev	*input;
@@ -65,9 +65,6 @@ struct akm_compass_data {
 	struct pinctrl		*pinctrl;
 	struct pinctrl_state	*pin_default;
 	struct pinctrl_state	*pin_sleep;
-	struct sensors_classdev	cdev;
-	struct delayed_work	dwork;
-	struct workqueue_struct	*work_queue;
 	struct mutex		op_mutex;
 
 	wait_queue_head_t	drdy_wq;
@@ -80,58 +77,34 @@ struct akm_compass_data {
 
 	struct	mutex sensor_mutex;
 	uint8_t	sense_data[AKM_SENSOR_DATA_SIZE];
-	struct mutex accel_mutex;
-	int16_t accel_data[3];
+	/* Positive value means the device is working.
+	   0 or negative value means the device is not woking,
+	   i.e. in power-down mode. */
+	int8_t	is_busy;
 
 	struct mutex	val_mutex;
 	uint32_t		enable_flag;
-	int64_t			delay[AKM_NUM_SENSORS];
+	int64_t			delay;
 
 	atomic_t	active;
 	atomic_t	drdy;
 
-	char	layout;
+	char layout;
 	int	irq;
 	int	gpio_rstn;
-	int	power_enabled;
-	int	auto_report;
-	int	use_hrtimer;
 
-	/* The input event last time */
-	int	last_x;
-	int	last_y;
-	int	last_z;
-
-	/* dummy value to avoid sensor event get eaten */
-	int	rep_cnt;
-
-	struct regulator	*vdd;
-	struct regulator	*vio;
-	struct akm_sensor_state state;
-	struct hrtimer	poll_timer;
-};
-
-static struct sensors_classdev sensors_cdev = {
-	.name = "akm09911-mag",
-	.vendor = "Asahi Kasei Microdevices Corporation",
-	.version = 1,
-	.handle = SENSORS_MAGNETIC_FIELD_HANDLE,
-	.type = SENSOR_TYPE_MAGNETIC_FIELD,
-	.max_range = "1228.8",
-	.resolution = "0.6",
-	.sensor_power = "0.35",
-	.min_delay = 10000,
-	.fifo_reserved_event_count = 0,
-	.fifo_max_event_count = 0,
-	.enabled = 0,
-	.delay_msec = 10,
-	.sensors_enable = NULL,
-	.sensors_poll_delay = NULL,
+	struct	regulator		*vdd;
+	struct	regulator		*vio;
+	bool	power_enabled;
+	struct	akm_sensor_state		state;
+	/* ASUS BSP Peter_Lu for E-compass Debug & ATD tool */
+	bool compass_debug_switch;
 };
 
 static struct akm_compass_data *s_akm;
 
 static int akm_compass_power_set(struct akm_compass_data *data, bool on);
+
 /***** I2C I/O function ***********************************************/
 static int akm_i2c_rxdata(
 	struct i2c_client *i2c,
@@ -158,7 +131,7 @@ static int akm_i2c_rxdata(
 
 	ret = i2c_transfer(i2c->adapter, msgs, ARRAY_SIZE(msgs));
 	if (ret < 0) {
-		dev_err(&i2c->dev, "%s: transfer failed.", __func__);
+		dev_err(&i2c->dev, "%s: transfer failed.\n", __func__);
 		return ret;
 	} else if (ret != ARRAY_SIZE(msgs)) {
 		dev_err(&i2c->dev, "%s: transfer failed(size error).\n",
@@ -204,6 +177,86 @@ static int akm_i2c_txdata(
 	return 0;
 }
 
+
+//<asus-annacheng20150129>>>>>>>>>>>>>>>>>>>>>>>+
+static int Compasssensor_proc_show(struct seq_file *m, void *v) {
+	
+		int ret = 0,err=0,i=0;
+		uint8_t buffer[2];
+		uint8_t idReg[2];
+		struct akm_compass_data  *akm =s_akm;
+				
+		
+		for (i=0;i<2;i++){
+			buffer[0]=0x00+i;
+			err = akm_i2c_rxdata(akm->i2c, buffer, 1);
+			idReg[i]=buffer[0];
+			printk(KERN_INFO "[AKM] i2c reg value %d=0x%x\n",i,buffer[0]);
+			
+			
+		}
+		if (err < 0)
+			printk(KERN_INFO "[AKM] i2c err\n");
+			
+			
+		
+		//struct CM36283_info *lpi = lp_info_cm36283;   
+		//ret1 = _CM36283_I2C_Read_Word(lpi->slave_addr, ID_REG, &idReg);
+		printk("anna-sensor idReg : 0x00=0x%x \n", buffer[0]);
+	      
+	  	if(err<0){
+			ret =seq_printf(m," ERROR: i2c r/w test fail\n");	
+		}else{
+			ret =seq_printf(m," ACK: i2c r/w test ok\n");	
+		}
+		if(Driverversion != NULL){
+			ret =seq_printf(m," Driver version:%s\n",Driverversion);
+		}
+		else{
+			ret =seq_printf(m," Driver version:NULL\n");
+		}
+	  	if((idReg[0]==0x48)&&(idReg[1]==0X05)){//vendorid  ,deviceid
+	  		ret =seq_printf(m," Vendor:%s(0x0%x%x)\n", VENDOR,idReg[1],idReg[0]);
+		}else{
+			ret =seq_printf(m," Vendor:%s(0x0%x%x)\n", VENDOR,idReg[1],idReg[0]);
+		}
+
+		buffer[0]=0x00;
+		err = akm_i2c_rxdata(akm->i2c, buffer, 1);
+		printk("anna-sensor idReg33 : 0x00=0x%x \n", buffer[0]);
+		if(err<0){	  		
+			ret =seq_printf(m," Device status:error\n");			
+		}else{
+			ret =seq_printf(m," Device status:ok\n");			
+		}
+	     	    
+   	return ret;
+
+}
+
+
+static int Compasssensor_proc_open(struct inode *inode, struct  file *file) {
+  return single_open(file, Compasssensor_proc_show, NULL);
+}
+
+static const struct file_operations compasssensor_proc_fops = {
+  .owner = THIS_MODULE,
+  .open = Compasssensor_proc_open,
+  .read = seq_read,
+  .llseek = seq_lseek,
+  .release = single_release,
+};
+
+int create_asusproc_compasssensor_status_entry(void){
+	compasssensor_entry = proc_create("ecompass_status", S_IWUGO| S_IRUGO, NULL,&compasssensor_proc_fops);
+ 	if (!compasssensor_entry)
+       		 return -ENOMEM;
+
+    	return 0;
+}
+
+//<asus-annacheng20150129><<<<<<<<<<<<<<<<<+
+
 /***** akm miscdevice functions *************************************/
 static int AKECS_Set_CNTL(
 	struct akm_compass_data *akm,
@@ -214,19 +267,29 @@ static int AKECS_Set_CNTL(
 
 	/***** lock *****/
 	mutex_lock(&akm->sensor_mutex);
-	/* Set measure mode */
-	buffer[0] = AKM_REG_MODE;
-	buffer[1] = mode;
-	err = akm_i2c_txdata(akm->i2c, buffer, 2);
-	if (err < 0) {
+	/* Busy check */
+	if (akm->is_busy > 0) {
 		dev_err(&akm->i2c->dev,
-				"%s: Can not set CNTL.", __func__);
+				"%s: device is busy.\n", __func__);
+		err = -EBUSY;
 	} else {
-		dev_vdbg(&akm->i2c->dev,
-				"Mode is set to (%d).", mode);
-		atomic_set(&akm->drdy, 0);
-		/* wait at least 100us after changing mode */
-		udelay(100);
+		/* Set measure mode */
+		buffer[0] = AKM_REG_MODE;
+		buffer[1] = mode;
+		err = akm_i2c_txdata(akm->i2c, buffer, 2);
+		if (err < 0) {
+			dev_err(&akm->i2c->dev,
+					"%s: Can not set CNTL.", __func__);
+		} else {
+			dev_vdbg(&akm->i2c->dev,
+					"Mode is set to (%d).", mode);
+			/* Set flag */
+			akm->is_busy = 1;
+			atomic_set(&akm->drdy, 0);
+			/* wait at least 100us after changing mode */
+			udelay(100);
+		}
+		akm->is_busy = 0;
 	}
 
 	mutex_unlock(&akm->sensor_mutex);
@@ -256,6 +319,8 @@ static int AKECS_Set_PowerDown(
 		/* wait at least 100us after changing mode */
 		udelay(100);
 	}
+	/* Clear status */
+	akm->is_busy = 0;
 	atomic_set(&akm->drdy, 0);
 
 	mutex_unlock(&akm->sensor_mutex);
@@ -274,13 +339,14 @@ static int AKECS_Reset(
 	uint8_t buffer[2];
 
 	/***** lock *****/
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] AKECS_Reset +\n");
 	mutex_lock(&akm->sensor_mutex);
-
 	if (hard != 0) {
 		gpio_set_value(akm->gpio_rstn, 0);
 		udelay(5);
 		gpio_set_value(akm->gpio_rstn, 1);
-		/* No error is returned */
+		// No error is returned
 		err = 0;
 	} else {
 		buffer[0] = AKM_REG_RESET;
@@ -295,9 +361,14 @@ static int AKECS_Reset(
 	}
 	/* Device will be accessible 100 us after */
 	udelay(100);
+	/* Clear status */
+	akm->is_busy = 0;
 	atomic_set(&akm->drdy, 0);
+
 	mutex_unlock(&akm->sensor_mutex);
 	/***** unlock *****/
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] AKECS_Reset -\n");
 
 #else
 	err = AKECS_Set_PowerDown(akm);
@@ -312,14 +383,27 @@ static int AKECS_SetMode(
 {
 	int err;
 
+	if (s_akm->compass_debug_switch)	{
+		switch (mode & 0x1F) {
+		case AKM_MODE_SNG_MEASURE:
+			printk("[E-compass] AKM Set SNG_MEASURE function mode(%d) \n", mode);
+			break;
+		case AKM_MODE_SELF_TEST:
+			printk("[E-compass] AKM Set SELF_TEST function mode(%d) \n", mode);
+			break;
+		case AKM_MODE_FUSE_ACCESS:
+			printk("[E-compass] AKM Set FUSE_ACCESS function mode(%d) \n", mode);
+			break;
+		case AKM_MODE_POWERDOWN:
+			printk("[E-compass] AKM Power down(%d) \n", mode);
+			break;
+		}
+	}
+
 	switch (mode & 0x1F) {
 	case AKM_MODE_SNG_MEASURE:
 	case AKM_MODE_SELF_TEST:
 	case AKM_MODE_FUSE_ACCESS:
-	case AKM_MODE_CONTINUOUS_10HZ:
-	case AKM_MODE_CONTINUOUS_20HZ:
-	case AKM_MODE_CONTINUOUS_50HZ:
-	case AKM_MODE_CONTINUOUS_100HZ:
 		err = AKECS_Set_CNTL(akm, mode);
 		break;
 	case AKM_MODE_POWERDOWN:
@@ -330,7 +414,7 @@ static int AKECS_SetMode(
 			"%s: Unknown mode(%d).", __func__, mode);
 		return -EINVAL;
 	}
-
+	akm->state.mode = mode;
 	return err;
 }
 
@@ -338,16 +422,11 @@ static void AKECS_SetYPR(
 	struct akm_compass_data *akm,
 	int *rbuf)
 {
-	uint32_t ready;
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] alp : AKECS_SetYPR +\n");
 	dev_vdbg(&akm->i2c->dev, "%s: flag =0x%X", __func__, rbuf[0]);
 	dev_vdbg(&akm->input->dev, "  Acc [LSB]   : %6d,%6d,%6d stat=%d",
 		rbuf[1], rbuf[2], rbuf[3], rbuf[4]);
-	dev_vdbg(&akm->input->dev, "  Geo [LSB]   : %6d,%6d,%6d stat=%d",
-		rbuf[5], rbuf[6], rbuf[7], rbuf[8]);
-	dev_vdbg(&akm->input->dev, "  Orientation : %6d,%6d,%6d",
-		rbuf[9], rbuf[10], rbuf[11]);
-	dev_vdbg(&akm->input->dev, "  Rotation V  : %6d,%6d,%6d,%6d",
-		rbuf[12], rbuf[13], rbuf[14], rbuf[15]);
 
 	/* No events are reported */
 	if (!rbuf[0]) {
@@ -355,38 +434,16 @@ static void AKECS_SetYPR(
 		return;
 	}
 
-	mutex_lock(&akm->val_mutex);
-	ready = (akm->enable_flag & (uint32_t)rbuf[0]);
-	mutex_unlock(&akm->val_mutex);
-
-	/* Report acceleration sensor information */
-	if (ready & ACC_DATA_READY) {
-		input_report_abs(akm->input, ABS_X, rbuf[1]);
-		input_report_abs(akm->input, ABS_Y, rbuf[2]);
-		input_report_abs(akm->input, ABS_Z, rbuf[3]);
-		input_report_abs(akm->input, ABS_RX, rbuf[4]);
-	}
 	/* Report magnetic vector information */
-	if (ready & MAG_DATA_READY) {
-		input_report_abs(akm->input, ABS_X, rbuf[5]);
-		input_report_abs(akm->input, ABS_Y, rbuf[6]);
-		input_report_abs(akm->input, ABS_Z, rbuf[7]);
-		input_report_abs(akm->input, ABS_MISC, rbuf[8]);
-	}
-	/* Report fusion sensor information */
-	if (ready & FUSION_DATA_READY) {
-		/* Orientation */
-		input_report_abs(akm->input, ABS_HAT0Y, rbuf[9]);
-		input_report_abs(akm->input, ABS_HAT1X, rbuf[10]);
-		input_report_abs(akm->input, ABS_HAT1Y, rbuf[11]);
-		/* Rotation Vector */
-		input_report_abs(akm->input, ABS_TILT_X, rbuf[12]);
-		input_report_abs(akm->input, ABS_TILT_Y, rbuf[13]);
-		input_report_abs(akm->input, ABS_TOOL_WIDTH, rbuf[14]);
-		input_report_abs(akm->input, ABS_VOLUME, rbuf[15]);
-	}
+	/* Before copy values to buffer, check AKM_YPR_DATA_SIZE */
+	input_report_abs(akm->input, ABS_RX, rbuf[1]);
+	input_report_abs(akm->input, ABS_RY, rbuf[2]);
+	input_report_abs(akm->input, ABS_RZ, rbuf[3]);
+	input_report_abs(akm->input, ABS_RUDDER, rbuf[4]);
 
 	input_sync(akm->input);
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] alp : AKECS_SetYPR -\n");
 }
 
 /* This function will block a process until the latest measurement
@@ -400,6 +457,8 @@ static int AKECS_GetData(
 	int err;
 
 	/* Block! */
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] alp : AKECS_GetData +\n");
 	err = wait_event_interruptible_timeout(
 			akm->drdy_wq,
 			atomic_read(&akm->drdy),
@@ -407,12 +466,12 @@ static int AKECS_GetData(
 
 	if (err < 0) {
 		dev_err(&akm->i2c->dev,
-			"%s: wait_event failed (%d).", __func__, err);
+			"[E-compass] %s: wait_event failed (%d).", __func__, err);
 		return err;
 	}
 	if (!atomic_read(&akm->drdy)) {
 		dev_err(&akm->i2c->dev,
-			"%s: DRDY is not set.", __func__);
+			"[E-compass] %s: DRDY is not set.\n", __func__);
 		return -ENODATA;
 	}
 
@@ -425,6 +484,8 @@ static int AKECS_GetData(
 	mutex_unlock(&akm->sensor_mutex);
 	/***** unlock *****/
 
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] alp : AKECS_GetData -\n");
 	return 0;
 }
 
@@ -436,9 +497,11 @@ static int AKECS_GetData_Poll(
 	uint8_t buffer[AKM_SENSOR_DATA_SIZE];
 	int err;
 
-	/* Read data */
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] alp : AKECS_GetData_Poll +\n");
+	/* Read status */
 	buffer[0] = AKM_REG_STATUS;
-	err = akm_i2c_rxdata(akm->i2c, buffer, AKM_SENSOR_DATA_SIZE);
+	err = akm_i2c_rxdata(akm->i2c, buffer, 1);
 	if (err < 0) {
 		dev_err(&akm->i2c->dev, "%s failed.", __func__);
 		return err;
@@ -446,14 +509,24 @@ static int AKECS_GetData_Poll(
 
 	/* Check ST bit */
 	if (!(AKM_DRDY_IS_HIGH(buffer[0])))
-		dev_dbg(&akm->i2c->dev, "DRDY is low. Use last value.\n");
+		return -EAGAIN;
 
-	/* Data is over run is */
-	if (AKM_DOR_IS_HIGH(buffer[0]))
-		dev_dbg(&akm->i2c->dev, "Data over run!\n");
+	/* Read rest data */
+	buffer[1] = AKM_REG_STATUS + 1;
+	err = akm_i2c_rxdata(akm->i2c, &(buffer[1]), AKM_SENSOR_DATA_SIZE-1);
+	if (err < 0) {
+		dev_err(&akm->i2c->dev, "%s failed.", __func__);
+		return err;
+	}
 
 	memcpy(rbuf, buffer, size);
 	atomic_set(&akm->drdy, 0);
+
+	/***** lock *****/
+	mutex_lock(&akm->sensor_mutex);
+	akm->is_busy = 0;
+	mutex_unlock(&akm->sensor_mutex);
+	/***** unlock *****/
 
 	return 0;
 }
@@ -474,12 +547,15 @@ static int AKECS_GetCloseStatus(
 
 static int AKECS_Open(struct inode *inode, struct file *file)
 {
+
+	printk("zxtest AKECS_Open\n");
 	file->private_data = s_akm;
 	return nonseekable_open(inode, file);
 }
 
 static int AKECS_Release(struct inode *inode, struct file *file)
 {
+	printk("zxtest AKECS_Release\n");
 	return 0;
 }
 
@@ -487,47 +563,49 @@ static long
 AKECS_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	void __user *argp = (void __user *)arg;
-	struct akm_compass_data *akm = file->private_data;
+//	struct akm_compass_data *akm = file->private_data;
 
 	/* NOTE: In this function the size of "char" should be 1-byte. */
 	uint8_t i2c_buf[AKM_RWBUF_SIZE];		/* for READ/WRITE */
 	uint8_t dat_buf[AKM_SENSOR_DATA_SIZE];/* for GET_DATA */
 	int32_t ypr_buf[AKM_YPR_DATA_SIZE];		/* for SET_YPR */
-	int64_t delay[AKM_NUM_SENSORS];	/* for GET_DELAY */
-	int16_t acc_buf[3];	/* for GET_ACCEL */
-	uint8_t mode;			/* for SET_MODE*/
+	int64_t delay;		/* for GET_DELAY */
+	uint8_t mode;		/* for SET_MODE*/
 	int status;			/* for OPEN/CLOSE_STATUS */
 	int ret = 0;		/* Return value. */
+
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] alp : AKECS_ioctl : (0x%4X) +\n", cmd & 0xFF);
 
 	switch (cmd) {
 	case ECS_IOCTL_READ:
 	case ECS_IOCTL_WRITE:
 		if (argp == NULL) {
-			dev_err(&akm->i2c->dev, "invalid argument.");
+			dev_err(&s_akm->i2c->dev, "invalid argument.");
 			return -EINVAL;
 		}
 		if (copy_from_user(&i2c_buf, argp, sizeof(i2c_buf))) {
-			dev_err(&akm->i2c->dev, "copy_from_user failed.");
+			dev_err(&s_akm->i2c->dev, "copy_from_user failed.");
 			return -EFAULT;
 		}
 		break;
 	case ECS_IOCTL_SET_MODE:
 		if (argp == NULL) {
-			dev_err(&akm->i2c->dev, "invalid argument.");
+			dev_err(&s_akm->i2c->dev, "invalid argument.");
 			return -EINVAL;
 		}
 		if (copy_from_user(&mode, argp, sizeof(mode))) {
-			dev_err(&akm->i2c->dev, "copy_from_user failed.");
+			dev_err(&s_akm->i2c->dev, "copy_from_user failed.");
 			return -EFAULT;
 		}
 		break;
 	case ECS_IOCTL_SET_YPR:
 		if (argp == NULL) {
-			dev_err(&akm->i2c->dev, "invalid argument.");
+			dev_err(&s_akm->i2c->dev, "invalid argument.");
 			return -EINVAL;
 		}
 		if (copy_from_user(&ypr_buf, argp, sizeof(ypr_buf))) {
-			dev_err(&akm->i2c->dev, "copy_from_user failed.");
+			dev_err(&s_akm->i2c->dev, "copy_from_user failed.");
 			return -EFAULT;
 		}
 	case ECS_IOCTL_GET_INFO:
@@ -537,10 +615,9 @@ AKECS_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case ECS_IOCTL_GET_CLOSE_STATUS:
 	case ECS_IOCTL_GET_DELAY:
 	case ECS_IOCTL_GET_LAYOUT:
-	case ECS_IOCTL_GET_ACCEL:
 		/* Check buffer pointer for writing a data later. */
 		if (argp == NULL) {
-			dev_err(&akm->i2c->dev, "invalid argument.");
+			dev_err(&s_akm->i2c->dev, "invalid argument.");
 			return -EINVAL;
 		}
 		break;
@@ -550,97 +627,82 @@ AKECS_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 	switch (cmd) {
 	case ECS_IOCTL_READ:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_READ called.");
+		dev_vdbg(&s_akm->i2c->dev, "IOCTL_READ called.");
 		if ((i2c_buf[0] < 1) || (i2c_buf[0] > (AKM_RWBUF_SIZE-1))) {
-			dev_err(&akm->i2c->dev, "invalid argument.");
+			dev_err(&s_akm->i2c->dev, "invalid argument.");
 			return -EINVAL;
 		}
-		ret = akm_i2c_rxdata(akm->i2c, &i2c_buf[1], i2c_buf[0]);
+		ret = akm_i2c_rxdata(s_akm->i2c, &i2c_buf[1], i2c_buf[0]);
 		if (ret < 0)
 			return ret;
 		break;
 	case ECS_IOCTL_WRITE:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_WRITE called.");
+		dev_vdbg(&s_akm->i2c->dev, "IOCTL_WRITE called.");
 		if ((i2c_buf[0] < 2) || (i2c_buf[0] > (AKM_RWBUF_SIZE-1))) {
-			dev_err(&akm->i2c->dev, "invalid argument.");
+			dev_err(&s_akm->i2c->dev, "invalid argument.");
 			return -EINVAL;
 		}
-		ret = akm_i2c_txdata(akm->i2c, &i2c_buf[1], i2c_buf[0]);
+		ret = akm_i2c_txdata(s_akm->i2c, &i2c_buf[1], i2c_buf[0]);
 		if (ret < 0)
 			return ret;
 		break;
 	case ECS_IOCTL_RESET:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_RESET called.");
-		ret = AKECS_Reset(akm, akm->gpio_rstn);
+		dev_vdbg(&s_akm->i2c->dev, "IOCTL_RESET called.");
+		ret = AKECS_Reset(s_akm, s_akm->gpio_rstn);
 		if (ret < 0)
 			return ret;
 		break;
 	case ECS_IOCTL_SET_MODE:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_SET_MODE called.");
-		ret = AKECS_SetMode(akm, mode);
+		dev_vdbg(&s_akm->i2c->dev, "IOCTL_SET_MODE called.");
+		ret = AKECS_SetMode(s_akm, mode);
 		if (ret < 0)
 			return ret;
 		break;
 	case ECS_IOCTL_SET_YPR:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_SET_YPR called.");
-		AKECS_SetYPR(akm, ypr_buf);
+		dev_vdbg(&s_akm->i2c->dev, "IOCTL_SET_YPR called.");
+		AKECS_SetYPR(s_akm, ypr_buf);
 		break;
 	case ECS_IOCTL_GET_DATA:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_GET_DATA called.");
-		if (akm->irq)
-			ret = AKECS_GetData(akm, dat_buf, AKM_SENSOR_DATA_SIZE);
+		dev_vdbg(&s_akm->i2c->dev, "IOCTL_GET_DATA called.");
+		if (s_akm->irq)
+			ret = AKECS_GetData(s_akm, dat_buf, AKM_SENSOR_DATA_SIZE);
 		else
 			ret = AKECS_GetData_Poll(
-					akm, dat_buf, AKM_SENSOR_DATA_SIZE);
+					s_akm, dat_buf, AKM_SENSOR_DATA_SIZE);
 
 		if (ret < 0)
 			return ret;
 		break;
 	case ECS_IOCTL_GET_OPEN_STATUS:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_GET_OPEN_STATUS called.");
-		ret = AKECS_GetOpenStatus(akm);
+		dev_vdbg(&s_akm->i2c->dev, "IOCTL_GET_OPEN_STATUS called.");
+		ret = AKECS_GetOpenStatus(s_akm);
 		if (ret < 0) {
-			dev_err(&akm->i2c->dev,
-				"Get Open returns error (%d).", ret);
+			printk(KERN_ERR "[E-compass] open status stop ret(%d).\n", ret);
 			return ret;
 		}
 		break;
 	case ECS_IOCTL_GET_CLOSE_STATUS:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_GET_CLOSE_STATUS called.");
-		ret = AKECS_GetCloseStatus(akm);
+		dev_vdbg(&s_akm->i2c->dev, "IOCTL_GET_CLOSE_STATUS called.");
+		ret = AKECS_GetCloseStatus(s_akm);
 		if (ret < 0) {
-			dev_err(&akm->i2c->dev,
-				"Get Close returns error (%d).", ret);
+			printk(KERN_ERR "[E-compass] close status stop ret(%d).\n", ret);
 			return ret;
 		}
 		break;
 	case ECS_IOCTL_GET_DELAY:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_GET_DELAY called.");
-		mutex_lock(&akm->val_mutex);
-		delay[0] = ((akm->enable_flag & ACC_DATA_READY) ?
-				akm->delay[0] : -1);
-		delay[1] = ((akm->enable_flag & MAG_DATA_READY) ?
-				akm->delay[1] : -1);
-		delay[2] = ((akm->enable_flag & FUSION_DATA_READY) ?
-				akm->delay[2] : -1);
-		mutex_unlock(&akm->val_mutex);
+		dev_vdbg(&s_akm->i2c->dev, "IOCTL_GET_DELAY called.");
+		mutex_lock(&s_akm->val_mutex);
+		delay = (s_akm->enable_flag ? s_akm->delay : -1);
+		mutex_unlock(&s_akm->val_mutex);
 		break;
 	case ECS_IOCTL_GET_INFO:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_GET_INFO called.");
+		dev_vdbg(&s_akm->i2c->dev, "IOCTL_GET_INFO called.");
 		break;
 	case ECS_IOCTL_GET_CONF:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_GET_CONF called.");
+		dev_vdbg(&s_akm->i2c->dev, "IOCTL_GET_CONF called.");
 		break;
 	case ECS_IOCTL_GET_LAYOUT:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_GET_LAYOUT called.");
-		break;
-	case ECS_IOCTL_GET_ACCEL:
-		dev_vdbg(&akm->i2c->dev, "IOCTL_GET_ACCEL called.");
-		mutex_lock(&akm->accel_mutex);
-		acc_buf[0] = akm->accel_data[0];
-		acc_buf[1] = akm->accel_data[1];
-		acc_buf[2] = akm->accel_data[2];
-		mutex_unlock(&akm->accel_mutex);
+		dev_vdbg(&s_akm->i2c->dev, "IOCTL_GET_LAYOUT called.");
 		break;
 	default:
 		return -ENOTTY;
@@ -650,53 +712,47 @@ AKECS_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case ECS_IOCTL_READ:
 		/* +1  is for the first byte */
 		if (copy_to_user(argp, &i2c_buf, i2c_buf[0]+1)) {
-			dev_err(&akm->i2c->dev, "copy_to_user failed.");
+			dev_err(&s_akm->i2c->dev, "copy_to_user failed.");
 			return -EFAULT;
 		}
 		break;
 	case ECS_IOCTL_GET_INFO:
-		if (copy_to_user(argp, &akm->sense_info,
-					sizeof(akm->sense_info))) {
-			dev_err(&akm->i2c->dev, "copy_to_user failed.");
+		if (copy_to_user(argp, &s_akm->sense_info,
+					sizeof(s_akm->sense_info))) {
+			dev_err(&s_akm->i2c->dev, "copy_to_user failed.");
 			return -EFAULT;
 		}
 		break;
 	case ECS_IOCTL_GET_CONF:
-		if (copy_to_user(argp, &akm->sense_conf,
-					sizeof(akm->sense_conf))) {
-			dev_err(&akm->i2c->dev, "copy_to_user failed.");
+		if (copy_to_user(argp, &s_akm->sense_conf,
+					sizeof(s_akm->sense_conf))) {
+			dev_err(&s_akm->i2c->dev, "copy_to_user failed.");
 			return -EFAULT;
 		}
 		break;
 	case ECS_IOCTL_GET_DATA:
 		if (copy_to_user(argp, &dat_buf, sizeof(dat_buf))) {
-			dev_err(&akm->i2c->dev, "copy_to_user failed.");
+			dev_err(&s_akm->i2c->dev, "copy_to_user failed.");
 			return -EFAULT;
 		}
 		break;
 	case ECS_IOCTL_GET_OPEN_STATUS:
 	case ECS_IOCTL_GET_CLOSE_STATUS:
-		status = atomic_read(&akm->active);
+		status = atomic_read(&s_akm->active);
 		if (copy_to_user(argp, &status, sizeof(status))) {
-			dev_err(&akm->i2c->dev, "copy_to_user failed.");
+			dev_err(&s_akm->i2c->dev, "copy_to_user failed.");
 			return -EFAULT;
 		}
 		break;
 	case ECS_IOCTL_GET_DELAY:
 		if (copy_to_user(argp, &delay, sizeof(delay))) {
-			dev_err(&akm->i2c->dev, "copy_to_user failed.");
+			dev_err(&s_akm->i2c->dev, "copy_to_user failed.");
 			return -EFAULT;
 		}
 		break;
 	case ECS_IOCTL_GET_LAYOUT:
-		if (copy_to_user(argp, &akm->layout, sizeof(akm->layout))) {
-			dev_err(&akm->i2c->dev, "copy_to_user failed.");
-			return -EFAULT;
-		}
-		break;
-	case ECS_IOCTL_GET_ACCEL:
-		if (copy_to_user(argp, &acc_buf, sizeof(acc_buf))) {
-			dev_err(&akm->i2c->dev, "copy_to_user failed.");
+		if (copy_to_user(argp, &s_akm->layout, sizeof(s_akm->layout))) {
+			dev_err(&s_akm->i2c->dev, "copy_to_user failed.");
 			return -EFAULT;
 		}
 		break;
@@ -752,51 +808,14 @@ static void remove_device_attributes(
 		device_remove_file(dev, &attrs[i]);
 }
 
-static int create_device_binary_attributes(
-	struct kobject *kobj,
-	struct bin_attribute *attrs)
-{
-	int i;
-	int err = 0;
-
-	err = 0;
-
-	for (i = 0 ; NULL != attrs[i].attr.name ; ++i) {
-		err = sysfs_create_bin_file(kobj, &attrs[i]);
-		if (0 != err)
-			break;
-	}
-
-	if (0 != err) {
-		for (--i; i >= 0 ; --i)
-			sysfs_remove_bin_file(kobj, &attrs[i]);
-	}
-
-	return err;
-}
-
-static void remove_device_binary_attributes(
-	struct kobject *kobj,
-	struct bin_attribute *attrs)
-{
-	int i;
-
-	for (i = 0 ; NULL != attrs[i].attr.name ; ++i)
-		sysfs_remove_bin_file(kobj, &attrs[i]);
-}
-
 /*********************************************************************
  *
  * SysFS attribute functions
  *
  * directory : /sys/class/compass/akmXXXX/
  * files :
- *  - enable_acc    [rw] [t] : enable flag for accelerometer
- *  - enable_mag    [rw] [t] : enable flag for magnetometer
- *  - enable_fusion [rw] [t] : enable flag for fusion sensor
- *  - delay_acc     [rw] [t] : delay in nanosecond for accelerometer
- *  - delay_mag     [rw] [t] : delay in nanosecond for magnetometer
- *  - delay_fusion  [rw] [t] : delay in nanosecond for fusion sensor
+ *  - enable_mag [rw] [t] : enable flag for magnetometer
+ *  - delay_mag  [rw] [t] : delay in nanosecond for magnetometer
  *
  * debug :
  *  - mode       [w]  [t] : E-Compass mode
@@ -833,90 +852,20 @@ static void akm_compass_sysfs_update_status(
 		en, atomic_read(&akm->active));
 }
 
-static inline uint8_t akm_select_frequency(int64_t delay_ns)
-{
-	if (delay_ns >= 100000000LL)
-		return AKM_MODE_CONTINUOUS_10HZ;
-	else if (delay_ns >= 50000000LL)
-		return AKM_MODE_CONTINUOUS_20HZ;
-	else if (delay_ns >= 20000000LL)
-		return AKM_MODE_CONTINUOUS_50HZ;
-	else
-		return AKM_MODE_CONTINUOUS_100HZ;
-}
-
-static int akm_enable_set(struct sensors_classdev *sensors_cdev,
-		unsigned int enable)
-{
-	int ret = 0;
-	struct akm_compass_data *akm = container_of(sensors_cdev,
-			struct akm_compass_data, cdev);
-	uint8_t mode;
-
-	mutex_lock(&akm->val_mutex);
-	akm->enable_flag &= ~(1<<MAG_DATA_FLAG);
-	akm->enable_flag |= ((uint32_t)(enable))<<MAG_DATA_FLAG;
-	mutex_unlock(&akm->val_mutex);
-
-	akm_compass_sysfs_update_status(akm);
-	mutex_lock(&akm->op_mutex);
-	if (enable) {
-		ret = akm_compass_power_set(akm, true);
-		if (ret) {
-			dev_err(&akm->i2c->dev,
-				"Fail to power on the device!\n");
-			goto exit;
-		}
-
-		if (akm->auto_report) {
-			mode = akm_select_frequency(akm->delay[MAG_DATA_FLAG]);
-			AKECS_SetMode(akm, mode);
-			if (akm->use_hrtimer)
-				hrtimer_start(&akm->poll_timer,
-					ns_to_ktime(akm->delay[MAG_DATA_FLAG]),
-					HRTIMER_MODE_REL);
-			else
-				queue_delayed_work(akm->work_queue, &akm->dwork,
-					(unsigned long)nsecs_to_jiffies64(
-						akm->delay[MAG_DATA_FLAG]));
-		}
-	} else {
-		if (akm->auto_report) {
-			if (akm->use_hrtimer) {
-				hrtimer_cancel(&akm->poll_timer);
-				cancel_work_sync(&akm->dwork.work);
-			} else {
-				cancel_delayed_work_sync(&akm->dwork);
-			}
-			AKECS_SetMode(akm, AKM_MODE_POWERDOWN);
-		}
-		ret = akm_compass_power_set(akm, false);
-		if (ret) {
-			dev_err(&akm->i2c->dev,
-				"Fail to power off the device!\n");
-			goto exit;
-		}
-	}
-
-exit:
-	mutex_unlock(&akm->op_mutex);
-	return ret;
-}
-
 static ssize_t akm_compass_sysfs_enable_show(
-	struct akm_compass_data *akm, char *buf, int pos)
+	struct akm_compass_data *akm, char *buf)
 {
 	int flag;
 
 	mutex_lock(&akm->val_mutex);
-	flag = ((akm->enable_flag >> pos) & 1);
+	flag = ((akm->enable_flag) & 1);
 	mutex_unlock(&akm->val_mutex);
 
 	return scnprintf(buf, PAGE_SIZE, "%d\n", flag);
 }
 
 static ssize_t akm_compass_sysfs_enable_store(
-	struct akm_compass_data *akm, char const *buf, size_t count, int pos)
+	struct akm_compass_data *akm, char const *buf, size_t count)
 {
 	long en = 0;
 	int ret = 0;
@@ -933,105 +882,153 @@ static ssize_t akm_compass_sysfs_enable_store(
 	en = en ? 1 : 0;
 
 	mutex_lock(&akm->op_mutex);
+
 	ret = akm_compass_power_set(akm, en);
 	if (ret) {
 		dev_err(&akm->i2c->dev,
 			"Fail to configure device power!\n");
 		goto exit;
 	}
+
 	mutex_lock(&akm->val_mutex);
-	akm->enable_flag &= ~(1<<pos);
-	akm->enable_flag |= ((uint32_t)(en))<<pos;
+	akm->enable_flag &= ~(1);
+	akm->enable_flag |= ((uint32_t)(en));
 	mutex_unlock(&akm->val_mutex);
 
 	akm_compass_sysfs_update_status(akm);
 
 exit:
 	mutex_unlock(&akm->op_mutex);
-
 	return ret ? ret : count;
 }
 
-/***** Acceleration ***/
-static ssize_t akm_enable_acc_show(
+/***** Magnetic field ***/
+// ASUS_BSP +++ Jiunhau_Wang "[PF450CL][Sensor][NA][Spec] Porting 9-axis sensor"
+static ssize_t akm_chip_id_show(
 	struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return akm_compass_sysfs_enable_show(
-		dev_get_drvdata(dev), buf, ACC_DATA_FLAG);
+	struct akm_compass_data *akm = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", akm->sense_info[0]);
 }
-static ssize_t akm_enable_acc_store(
-	struct device *dev, struct device_attribute *attr,
-	char const *buf, size_t count)
+static int akm09911_i2c_check_device(struct i2c_client *client);
+static ssize_t akm_status_show(
+	struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return akm_compass_sysfs_enable_store(
-		dev_get_drvdata(dev), buf, count, ACC_DATA_FLAG);
+	int err;
+
+	err = akm09911_i2c_check_device(s_akm->i2c);
+	if (err < 0)
+		return sprintf(buf, "%d\n", 0);
+	else
+		return sprintf(buf, "%d\n", 1);
 }
 
-/***** Magnetic field ***/
+static ssize_t akm_i2c_show(
+	struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int err;
+
+	err = akm09911_i2c_check_device(s_akm->i2c);
+	if (err < 0)
+		return sprintf(buf, "%d\n", 0);
+	else
+		return sprintf(buf, "%d\n", 1);
+}
+
+static ssize_t akm_read_raw(
+	struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct akm_compass_data *akm = dev_get_drvdata(dev);
+	int err;
+	uint8_t buffer[AKM_SENSOR_DATA_SIZE];
+	int i;
+	int x = 0,y = 0,z = 0;
+	int raw[6];
+
+	memset(buffer, 0, sizeof(buffer));
+	
+	if (1)
+	{
+		err = AKECS_SetMode(akm, AK09911_MODE_SNG_MEASURE);
+		if (err < 0)
+		{
+			return sprintf(buf, "0 0 0 \n");
+		}
+			
+		mutex_lock(&akm->sensor_mutex);
+		buffer[0] = AKM_REG_STATUS;
+		err = akm_i2c_rxdata(akm->i2c, buffer, AKM_SENSOR_DATA_SIZE);
+		if (err < 0)
+		{
+			mutex_unlock(&akm->sensor_mutex);
+			return sprintf(buf, "0 0 0 \n");
+		}
+#if 0
+		if (!(AKM_DRDY_IS_HIGH(buffer[0])))
+		{
+			mutex_unlock(&akm->sensor_mutex);
+			return sprintf(buf, "0 0 0 \n");
+		}
+#endif
+		mdelay(10);
+		for(i = 0; i < 6; i++)
+		{
+			buffer[0] = 0x11 + i;
+			err = akm_i2c_rxdata(akm->i2c, buffer, AKM_SENSOR_DATA_SIZE);
+			if (err < 0)
+				printk(KERN_INFO "[AKM] i2c err\n");
+			raw[i] = buffer[0];
+			//msleep(5);
+		}
+		x = (short) (raw[0] | (raw[1] << 8));
+		y = (short) (raw[2] | (raw[3] << 8));
+		z = (short) (raw[4] | (raw[5] << 8));
+
+		mutex_unlock(&akm->sensor_mutex);
+		
+		err = AKECS_SetMode(akm, AK09911_MODE_POWERDOWN);
+		if (err < 0)
+		{
+			return sprintf(buf, "0 0 0 \n");
+		}
+	}
+	return sprintf(buf, "%d %d %d \n", x, y, z);
+#if 0
+	atomic_set(&akm->drdy, 1);
+	wake_up(&akm->drdy_wq);
+#endif
+}
+
+// ASUS_BSP --- Jiunhau_Wang "[PF450CL][Sensor][NA][Spec] Porting 9-axis sensor"
 static ssize_t akm_enable_mag_show(
 	struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return akm_compass_sysfs_enable_show(
-		dev_get_drvdata(dev), buf, MAG_DATA_FLAG);
+		dev_get_drvdata(dev), buf);
 }
 static ssize_t akm_enable_mag_store(
 	struct device *dev, struct device_attribute *attr,
 	char const *buf, size_t count)
 {
 	return akm_compass_sysfs_enable_store(
-		dev_get_drvdata(dev), buf, count, MAG_DATA_FLAG);
-}
-
-/***** Fusion ***/
-static ssize_t akm_enable_fusion_show(
-	struct device *dev, struct device_attribute *attr, char *buf)
-{
-	return akm_compass_sysfs_enable_show(
-		dev_get_drvdata(dev), buf, FUSION_DATA_FLAG);
-}
-static ssize_t akm_enable_fusion_store(
-	struct device *dev, struct device_attribute *attr,
-	char const *buf, size_t count)
-{
-	return akm_compass_sysfs_enable_store(
-		dev_get_drvdata(dev), buf, count, FUSION_DATA_FLAG);
+		dev_get_drvdata(dev), buf, count);
 }
 
 /***** sysfs delay **************************************************/
-static int akm_poll_delay_set(struct sensors_classdev *sensors_cdev,
-		unsigned int delay_msec)
-{
-	struct akm_compass_data *akm = container_of(sensors_cdev,
-			struct akm_compass_data, cdev);
-	uint8_t mode;
-	int ret;
-
-	mutex_lock(&akm->val_mutex);
-
-	akm->delay[MAG_DATA_FLAG] = delay_msec * 1000000;
-	mode = akm_select_frequency(akm->delay[MAG_DATA_FLAG]);
-	ret = AKECS_SetMode(akm, mode);
-	if (ret < 0)
-		dev_err(&akm->i2c->dev, "Failed to set to mode(%x)\n", mode);
-
-	mutex_unlock(&akm->val_mutex);
-	return ret;
-}
-
 static ssize_t akm_compass_sysfs_delay_show(
-	struct akm_compass_data *akm, char *buf, int pos)
+	struct akm_compass_data *akm, char *buf)
 {
 	int64_t val;
 
 	mutex_lock(&akm->val_mutex);
-	val = akm->delay[pos];
+	val = akm->delay;
 	mutex_unlock(&akm->val_mutex);
 
 	return scnprintf(buf, PAGE_SIZE, "%lld\n", val);
 }
 
 static ssize_t akm_compass_sysfs_delay_store(
-	struct akm_compass_data *akm, char const *buf, size_t count, int pos)
+	struct akm_compass_data *akm, char const *buf, size_t count)
 {
 	long long val = 0;
 
@@ -1044,26 +1041,13 @@ static ssize_t akm_compass_sysfs_delay_store(
 	if (strict_strtoll(buf, AKM_BASE_NUM, &val))
 		return -EINVAL;
 
+	printk("[E-compass] Setting compass delay : %lld\n", val);
+
 	mutex_lock(&akm->val_mutex);
-	akm->delay[pos] = val;
+	akm->delay = val;
 	mutex_unlock(&akm->val_mutex);
 
 	return count;
-}
-
-/***** Accelerometer ***/
-static ssize_t akm_delay_acc_show(
-	struct device *dev, struct device_attribute *attr, char *buf)
-{
-	return akm_compass_sysfs_delay_show(
-		dev_get_drvdata(dev), buf, ACC_DATA_FLAG);
-}
-static ssize_t akm_delay_acc_store(
-	struct device *dev, struct device_attribute *attr,
-	char const *buf, size_t count)
-{
-	return akm_compass_sysfs_delay_store(
-		dev_get_drvdata(dev), buf, count, ACC_DATA_FLAG);
 }
 
 /***** Magnetic field ***/
@@ -1071,59 +1055,14 @@ static ssize_t akm_delay_mag_show(
 	struct device *dev, struct device_attribute *attr, char *buf)
 {
 	return akm_compass_sysfs_delay_show(
-		dev_get_drvdata(dev), buf, MAG_DATA_FLAG);
+		dev_get_drvdata(dev), buf);
 }
 static ssize_t akm_delay_mag_store(
 	struct device *dev, struct device_attribute *attr,
 	char const *buf, size_t count)
 {
 	return akm_compass_sysfs_delay_store(
-		dev_get_drvdata(dev), buf, count, MAG_DATA_FLAG);
-}
-
-/***** Fusion ***/
-static ssize_t akm_delay_fusion_show(
-	struct device *dev, struct device_attribute *attr, char *buf)
-{
-	return akm_compass_sysfs_delay_show(
-		dev_get_drvdata(dev), buf, FUSION_DATA_FLAG);
-}
-static ssize_t akm_delay_fusion_store(
-	struct device *dev, struct device_attribute *attr,
-	char const *buf, size_t count)
-{
-	return akm_compass_sysfs_delay_store(
-		dev_get_drvdata(dev), buf, count, FUSION_DATA_FLAG);
-}
-
-/***** accel (binary) ***/
-static ssize_t akm_bin_accel_write(
-	struct file *file,
-	struct kobject *kobj,
-	struct bin_attribute *attr,
-		char *buf,
-		loff_t pos,
-		size_t size)
-{
-	struct device *dev = container_of(kobj, struct device, kobj);
-	struct akm_compass_data *akm = dev_get_drvdata(dev);
-	int16_t *accel_data;
-
-	if (size == 0)
-		return 0;
-
-	accel_data = (int16_t *)buf;
-
-	mutex_lock(&akm->accel_mutex);
-	akm->accel_data[0] = accel_data[0];
-	akm->accel_data[1] = accel_data[1];
-	akm->accel_data[2] = accel_data[2];
-	mutex_unlock(&akm->accel_mutex);
-
-	dev_vdbg(&akm->i2c->dev, "accel:%d,%d,%d\n",
-			accel_data[0], accel_data[1], accel_data[2]);
-
-	return size;
+		dev_get_drvdata(dev), buf, count);
 }
 
 
@@ -1150,39 +1089,10 @@ static ssize_t akm_sysfs_mode_store(
 	return 1;
 }
 
-static ssize_t akm_buf_print(
-	char *buf, uint8_t *data, size_t num)
-{
-	int sz, i;
-	char *cur;
-	size_t cur_len;
-
-	cur = buf;
-	cur_len = PAGE_SIZE;
-	sz = snprintf(cur, cur_len, "(HEX):");
-	if (sz < 0)
-		return sz;
-	cur += sz;
-	cur_len -= sz;
-	for (i = 0; i < num; i++) {
-		sz = snprintf(cur, cur_len, "%02X,", *data);
-		if (sz < 0)
-			return sz;
-		cur += sz;
-		cur_len -= sz;
-		data++;
-	}
-	sz = snprintf(cur, cur_len, "\n");
-	if (sz < 0)
-		return sz;
-	cur += sz;
-
-	return (ssize_t)(cur - buf);
-}
-
-static ssize_t akm_sysfs_bdata_show(
+static ssize_t akm09911_sysfs_bdata_show(
 	struct device *dev, struct device_attribute *attr, char *buf)
 {
+	/* AK09911 specific function */
 	struct akm_compass_data *akm = dev_get_drvdata(dev);
 	uint8_t rbuf[AKM_SENSOR_DATA_SIZE];
 
@@ -1190,86 +1100,84 @@ static ssize_t akm_sysfs_bdata_show(
 	memcpy(&rbuf, akm->sense_data, sizeof(rbuf));
 	mutex_unlock(&akm->sensor_mutex);
 
-	return akm_buf_print(buf, rbuf, AKM_SENSOR_DATA_SIZE);
+	return scnprintf(buf, PAGE_SIZE,
+		"0x%02X,0x%02X,0x%02X,0x%02X,"
+		"0x%02X,0x%02X,0x%02X,0x%02X,0x%02X\n",
+		rbuf[0], rbuf[1], rbuf[2], rbuf[3],
+		rbuf[4], rbuf[5], rbuf[6], rbuf[7], rbuf[8]);
 }
 
-static ssize_t akm_sysfs_asa_show(
+static ssize_t akm09911_sysfs_asa_show(
 	struct device *dev, struct device_attribute *attr, char *buf)
 {
+	/* AK09911 specific function */
 	struct akm_compass_data *akm = dev_get_drvdata(dev);
 	int err;
 	uint8_t asa[3];
 
-	err = AKECS_SetMode(akm, AKM_MODE_FUSE_ACCESS);
+	err = AKECS_SetMode(akm, AK09911_MODE_FUSE_ACCESS);
 	if (err < 0)
 		return err;
 
-	asa[0] = AKM_FUSE_1ST_ADDR;
+	asa[0] = AK09911_FUSE_ASAX;
 	err = akm_i2c_rxdata(akm->i2c, asa, 3);
 	if (err < 0)
 		return err;
 
-	err = AKECS_SetMode(akm, AKM_MODE_POWERDOWN);
+	err = AKECS_SetMode(akm, AK09911_MODE_POWERDOWN);
 	if (err < 0)
 		return err;
 
-	return akm_buf_print(buf, asa, 3);
+	return scnprintf(buf, PAGE_SIZE,
+			"0x%02X,0x%02X,0x%02X\n", asa[0], asa[1], asa[2]);
 }
 
-static ssize_t akm_sysfs_regs_show(
+static ssize_t akm09911_sysfs_regs_show(
 	struct device *dev, struct device_attribute *attr, char *buf)
 {
+	/* AK09911 specific function */
 	/* The total number of registers depends on the device. */
 	struct akm_compass_data *akm = dev_get_drvdata(dev);
 	int err;
-	uint8_t regs[AKM_REGS_SIZE];
+	uint8_t regs[13];
+	int sz;
+	int n;
+	char *cur;
 
 	/* This function does not lock mutex obj */
-	regs[0] = AKM_REGS_1ST_ADDR;
-	err = akm_i2c_rxdata(akm->i2c, regs, AKM_REGS_SIZE);
+	regs[0] = AK09911_REG_WIA1;
+	err = akm_i2c_rxdata(akm->i2c, regs, 13);
 	if (err < 0)
 		return err;
 
-	return akm_buf_print(buf, regs, AKM_REGS_SIZE);
+	cur = buf;
+	sz = snprintf(cur, PAGE_SIZE, "(HEX):");
+	cur += sz;
+	for (n = 0; n < 13; n++) {
+		sz = snprintf(cur, 4, "%02X,", regs[n]);
+		cur += sz;
+	}
+
+	return (ssize_t)(cur - buf);
 }
 #endif
 
 static struct device_attribute akm_compass_attributes[] = {
-	__ATTR(enable_acc, 0660, akm_enable_acc_show, akm_enable_acc_store),
 	__ATTR(enable_mag, 0660, akm_enable_mag_show, akm_enable_mag_store),
-	__ATTR(enable_fusion, 0660, akm_enable_fusion_show,
-			akm_enable_fusion_store),
-	__ATTR(delay_acc,  0660, akm_delay_acc_show,  akm_delay_acc_store),
 	__ATTR(delay_mag,  0660, akm_delay_mag_show,  akm_delay_mag_store),
-	__ATTR(delay_fusion, 0660, akm_delay_fusion_show,
-			akm_delay_fusion_store),
+// ASUS_BSP +++ Jiunhau_Wang "[PF450][Sensor][NA][Spec] Porting 9-axis sensor"
+	__ATTR(akm_chip_id, 0444, akm_chip_id_show, NULL),
+	__ATTR(akm_status, 0444, akm_status_show, NULL),
+	__ATTR(akm_09911_raw, 0444, akm_read_raw, NULL),
+	__ATTR(akm_i2c, 0444, akm_i2c_show, NULL),
+// ASUS_BSP --- Jiunhau_Wang "[PF450][Sensor][NA][Spec] Porting 9-axis sensor"
 #if AKM_DEBUG_IF
 	__ATTR(mode,  0220, NULL, akm_sysfs_mode_store),
-	__ATTR(bdata, 0440, akm_sysfs_bdata_show, NULL),
-	__ATTR(asa,   0440, akm_sysfs_asa_show, NULL),
-	__ATTR(regs,  0440, akm_sysfs_regs_show, NULL),
+	__ATTR(bdata, 0440, akm09911_sysfs_bdata_show, NULL),
+	__ATTR(asa,   0440, akm09911_sysfs_asa_show, NULL),
+	__ATTR(regs,  0440, akm09911_sysfs_regs_show, NULL),
 #endif
 	__ATTR_NULL,
-};
-
-#define __BIN_ATTR(name_, mode_, size_, private_, read_, write_) \
-	{ \
-		.attr    = { .name = __stringify(name_), .mode = mode_ }, \
-		.size    = size_, \
-		.private = private_, \
-		.read    = read_, \
-		.write   = write_, \
-	}
-
-#define __BIN_ATTR_NULL \
-	{ \
-		.attr   = { .name = NULL }, \
-	}
-
-static struct bin_attribute akm_compass_bin_attributes[] = {
-	__BIN_ATTR(accel, 0220, 6, NULL,
-				NULL, akm_bin_accel_write),
-	__BIN_ATTR_NULL
 };
 
 static char const *const device_link_name = "i2c";
@@ -1314,16 +1222,8 @@ static int create_sysfs_interfaces(struct akm_compass_data *akm)
 	if (0 > err)
 		goto exit_device_attributes_create_failed;
 
-	err = create_device_binary_attributes(
-			&akm->class_dev->kobj,
-			akm_compass_bin_attributes);
-	if (0 > err)
-		goto exit_device_binary_attributes_create_failed;
-
 	return err;
 
-exit_device_binary_attributes_create_failed:
-	remove_device_attributes(akm->class_dev, akm_compass_attributes);
 exit_device_attributes_create_failed:
 	sysfs_remove_link(&akm->class_dev->kobj, device_link_name);
 exit_sysfs_create_link_failed:
@@ -1342,9 +1242,6 @@ static void remove_sysfs_interfaces(struct akm_compass_data *akm)
 		return;
 
 	if (NULL != akm->class_dev) {
-		remove_device_binary_attributes(
-			&akm->class_dev->kobj,
-			akm_compass_bin_attributes);
 		remove_device_attributes(
 			akm->class_dev,
 			akm_compass_attributes);
@@ -1362,6 +1259,102 @@ static void remove_sysfs_interfaces(struct akm_compass_data *akm)
 	}
 }
 
+#ifdef CONFIG_I2C_STRESS_TEST
+#include <linux/i2c_testcase.h>
+#define I2C_TEST_compass_sensor_FAIL (-1)
+
+static int Compass_sensor_I2C_stress_test_function(void)
+{	
+	uint8_t buffer[AKM_SENSOR_DATA_SIZE];
+	int err = 0;
+	int rawdata_x = 0, rawdata_y = 0, rawdata_z = 0;
+
+	s_akm->sense_info[0] = AK09911_REG_CNTL1;
+	err = akm_i2c_rxdata(s_akm->i2c, s_akm->sense_info, 1);
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] get_akm09911_rawdata CNTL1 : (%d)\n", s_akm->sense_info[0]);
+	if (err < 0)	{
+		printk("[E-compass] akm_i2c_rxdata AKM_REG_STATUS read fail\n");
+		return err;
+	}
+	if (s_akm->sense_info[0] == 0)	{
+		err = AKECS_SetMode(s_akm, AK09911_MODE_SNG_MEASURE);
+		if (err < 0)	{
+			printk("[E-compass] get_akm09911_rawdata AK09911_MODE_SNG_MEASURE fail\n");
+			return err;
+		}
+	} else	{
+		err = AKECS_SetMode(s_akm, AK09911_MODE_POWERDOWN);
+		if (err < 0)	{
+			printk("[E-compass] get_akm09911_rawdata AK09911_MODE_POWERDOWN fail\n");
+			return err;
+		}
+		msleep(50);
+		err = AKECS_SetMode(s_akm, AK09911_MODE_SNG_MEASURE);
+		if (err < 0)	{
+			printk("[E-compass] get_akm09911_rawdata AK09911_MODE_SNG_MEASURE fail\n");
+			return err;
+		}
+	}
+	/* Read whole data and rest data */
+	buffer[0] = AKM_REG_STATUS ;
+	err = akm_i2c_rxdata(s_akm->i2c, buffer, AKM_SENSOR_DATA_SIZE);
+	if (err < 0)	{
+		printk("[E-compass] akm_i2c_rxdata AKM_REG_STATUS+1 fail\n");
+		return err;
+	}
+
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] rawdataX : (%d) | (%d)\n", buffer[1], buffer[2]);
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] rawdataY : (%d) | (%d)\n", buffer[3], buffer[4]);
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] rawdataZ : (%d) | (%d)\n", buffer[5], buffer[6]);
+	rawdata_x = ( buffer[1] | (buffer[2]<<8) );
+	rawdata_y = ( buffer[3] | (buffer[4]<<8) );
+	rawdata_z = ( buffer[5] | (buffer[6]<<8) );
+
+	if (rawdata_x > 0x7FFF)
+		rawdata_x = rawdata_x-0x10000;
+	if (rawdata_y > 0x7FFF)
+		rawdata_y = rawdata_y-0x10000;
+	if (rawdata_z > 0x7FFF)
+		rawdata_z = rawdata_z-0x10000;
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] Rawdata : (%d), (%d), (%d)\n", rawdata_x, rawdata_y, rawdata_z);
+
+	err = AKECS_SetMode(s_akm, AK09911_MODE_POWERDOWN);
+	if (err < 0)	{
+		printk("[E-compass] get_akm09911_rawdata AK09911_MODE_POWERDOWN fail\n");
+		return err;
+	}
+
+	return 0;
+}
+
+static int Compass_sensor_I2C_stress_test(struct i2c_client *apClient)
+{
+	int lnResult = I2C_TEST_PASS;
+	int err = 0;
+
+	i2c_log_in_test_case("TestCompassSensorI2C ++\n");
+
+	err = Compass_sensor_I2C_stress_test_function();
+	if (err < 0)	{
+		i2c_log_in_test_case("Fail to Test CompassSensorI2C!!!\n");
+		lnResult = I2C_TEST_compass_sensor_FAIL;
+		goto error_1;
+	}
+	i2c_log_in_test_case("TestCompassSensorI2C --\n");
+
+error_1:
+	return lnResult;
+}
+
+static struct i2c_test_case_info CompassSensorTestCaseInfo[] =	{
+	__I2C_STRESS_TEST_CASE_ATTR(Compass_sensor_I2C_stress_test),
+};
+#endif
 
 /***** akm input device functions ***********************************/
 static int akm_compass_input_init(
@@ -1376,46 +1369,15 @@ static int akm_compass_input_init(
 
 	/* Setup input device */
 	set_bit(EV_ABS, (*input)->evbit);
-	/* Accelerometer (720 x 16G)*/
-	input_set_abs_params(*input, ABS_X,
-			-11520, 11520, 0, 0);
-	input_set_abs_params(*input, ABS_Y,
-			-11520, 11520, 0, 0);
-	input_set_abs_params(*input, ABS_Z,
-			-11520, 11520, 0, 0);
-	input_set_abs_params(*input, ABS_RX,
-			0, 3, 0, 0);
 	/* Magnetic field (limited to 16bit) */
+	input_set_abs_params(*input, ABS_RX,
+			-32768, 32767, 0, 0);
 	input_set_abs_params(*input, ABS_RY,
 			-32768, 32767, 0, 0);
 	input_set_abs_params(*input, ABS_RZ,
 			-32768, 32767, 0, 0);
-	input_set_abs_params(*input, ABS_THROTTLE,
-			-32768, 32767, 0, 0);
 	input_set_abs_params(*input, ABS_RUDDER,
 			0, 3, 0, 0);
-
-	/* Orientation (degree in Q6 format) */
-	/*  yaw[0,360) pitch[-180,180) roll[-90,90) */
-	input_set_abs_params(*input, ABS_HAT0Y,
-			0, 23040, 0, 0);
-	input_set_abs_params(*input, ABS_HAT1X,
-			-11520, 11520, 0, 0);
-	input_set_abs_params(*input, ABS_HAT1Y,
-			-5760, 5760, 0, 0);
-	/* Rotation Vector [-1,+1] in Q14 format */
-	input_set_abs_params(*input, ABS_TILT_X,
-			-16384, 16384, 0, 0);
-	input_set_abs_params(*input, ABS_TILT_Y,
-			-16384, 16384, 0, 0);
-	input_set_abs_params(*input, ABS_TOOL_WIDTH,
-			-16384, 16384, 0, 0);
-	input_set_abs_params(*input, ABS_VOLUME,
-			-16384, 16384, 0, 0);
-
-	/* Report the dummy value */
-	input_set_abs_params(*input, ABS_MISC,
-			INT_MIN, INT_MAX, 0, 0);
 
 	/* Set name */
 	(*input)->name = AKM_INPUT_DEVICE_NAME;
@@ -1433,67 +1395,74 @@ static int akm_compass_input_init(
 /***** akm functions ************************************************/
 static irqreturn_t akm_compass_irq(int irq, void *handle)
 {
-	struct akm_compass_data *akm = handle;
+//	struct akm_compass_data *akm = handle;
 	uint8_t buffer[AKM_SENSOR_DATA_SIZE];
 	int err;
 
 	memset(buffer, 0, sizeof(buffer));
-
+	if (AKM_DEBUG_MESSAGE)
+		printk("[E-compass] alp : akm_compass_irq +\n");
 	/***** lock *****/
-	mutex_lock(&akm->sensor_mutex);
+	mutex_lock(&s_akm->sensor_mutex);
 
 	/* Read whole data */
 	buffer[0] = AKM_REG_STATUS;
-	err = akm_i2c_rxdata(akm->i2c, buffer, AKM_SENSOR_DATA_SIZE);
+	err = akm_i2c_rxdata(s_akm->i2c, buffer, AKM_SENSOR_DATA_SIZE);
 	if (err < 0) {
-		dev_err(&akm->i2c->dev, "IRQ I2C error.");
-		mutex_unlock(&akm->sensor_mutex);
+		dev_err(&s_akm->i2c->dev, "[E-compass] IRQ I2C error.");
+		s_akm->is_busy = 0;
+		mutex_unlock(&s_akm->sensor_mutex);
 		/***** unlock *****/
 
 		return IRQ_HANDLED;
 	}
 	/* Check ST bit */
-	if (!(AKM_DRDY_IS_HIGH(buffer[0])))
+	if (!(AKM_DRDY_IS_HIGH(buffer[0]))){
+		if (AKM_DEBUG_MESSAGE)
+			printk("[E-compass] alp : akm_compass_irq check_bit error\n");
 		goto work_func_none;
+	}
+	memcpy(s_akm->sense_data, buffer, AKM_SENSOR_DATA_SIZE);
+	s_akm->is_busy = 0;
 
-	memcpy(akm->sense_data, buffer, AKM_SENSOR_DATA_SIZE);
-
-	mutex_unlock(&akm->sensor_mutex);
+	mutex_unlock(&s_akm->sensor_mutex);
 	/***** unlock *****/
 
-	atomic_set(&akm->drdy, 1);
-	wake_up(&akm->drdy_wq);
-
-	dev_vdbg(&akm->i2c->dev, "IRQ handled.");
+	atomic_set(&s_akm->drdy, 1);
+	wake_up(&s_akm->drdy_wq);
+	if (AKM_DEBUG_MESSAGE)
+		printk("[E-compass] alp : akm_compass_irq -\n");
+	dev_vdbg(&s_akm->i2c->dev, "[E-compass] IRQ handled.");
 	return IRQ_HANDLED;
 
 work_func_none:
-	mutex_unlock(&akm->sensor_mutex);
+	mutex_unlock(&s_akm->sensor_mutex);
 	/***** unlock *****/
 
-	dev_vdbg(&akm->i2c->dev, "IRQ not handled.");
+	dev_vdbg(&s_akm->i2c->dev, "[E-compass] IRQ not handled.");
 	return IRQ_NONE;
 }
 
 static int akm_compass_suspend(struct device *dev)
 {
+
 	struct akm_compass_data *akm = dev_get_drvdata(dev);
 	int ret = 0;
 
-	if (AKM_IS_MAG_DATA_ENABLED() && akm->auto_report) {
-		if (akm->use_hrtimer)
-			hrtimer_cancel(&akm->poll_timer);
-		else
-			cancel_delayed_work_sync(&akm->dwork);
-	}
+	printk("[E-compass] alp : akm_compass_suspend !! \n");
 
-	ret = AKECS_SetMode(akm, AKM_MODE_POWERDOWN);
-	if (ret)
-		dev_warn(&akm->i2c->dev, "Failed to set to POWERDOWN mode.\n");
+	//if (AKM_IS_MAG_DATA_ENABLED() &&
+	//	akm->use_poll &&
+	//	akm->pdata->auto_report)
+	//	cancel_delayed_work_sync(&akm->dwork);
 
 	akm->state.power_on = akm->power_enabled;
-	if (akm->state.power_on)
+	if (akm->state.power_on) {
 		akm_compass_power_set(akm, false);
+		/* Clear status */
+		akm->is_busy = 0;
+		atomic_set(&akm->drdy, 0);
+	}
 
 	ret = pinctrl_select_state(akm->pinctrl, akm->pin_sleep);
 	if (ret)
@@ -1501,14 +1470,17 @@ static int akm_compass_suspend(struct device *dev)
 
 	dev_dbg(&akm->i2c->dev, "suspended\n");
 
-	return ret;
+	return 0;
+
 }
 
 static int akm_compass_resume(struct device *dev)
 {
+
 	struct akm_compass_data *akm = dev_get_drvdata(dev);
 	int ret = 0;
-	uint8_t mode;
+
+	printk("[E-compass] alp : akm_compass_resume !! \n");
 
 	ret = pinctrl_select_state(akm->pinctrl, akm->pin_default);
 	if (ret)
@@ -1521,29 +1493,23 @@ static int akm_compass_resume(struct device *dev)
 			goto exit;
 		}
 
-		if (AKM_IS_MAG_DATA_ENABLED() && akm->auto_report) {
-			mode = akm_select_frequency(akm->delay[MAG_DATA_FLAG]);
-			ret = AKECS_SetMode(akm, mode);
-			if (ret < 0) {
-				dev_err(&akm->i2c->dev, "Failed to set to mode(%d)\n",
-						mode);
-				goto exit;
-			}
-			if (akm->use_hrtimer)
-				hrtimer_start(&akm->poll_timer,
-					ns_to_ktime(akm->delay[MAG_DATA_FLAG]),
-					HRTIMER_MODE_REL);
-			else
-				queue_delayed_work(akm->work_queue, &akm->dwork,
-					(unsigned long)nsecs_to_jiffies64(
-						akm->delay[MAG_DATA_FLAG]));
+		ret = AKECS_SetMode(akm, akm->state.mode);
+		if (ret) {
+			dev_err(dev, "Sensor state resume fail!\n");
+			goto exit;
 		}
-	}
 
+		//if (AKM_IS_MAG_DATA_ENABLED() &&
+		//	akm->use_poll &&
+		//	akm->pdata->auto_report)
+		//	schedule_delayed_work(&akm->dwork,
+		//		(unsigned long)nsecs_to_jiffies64(
+		//		akm->delay[MAG_DATA_FLAG]));
+	}
 	dev_dbg(&akm->i2c->dev, "resumed\n");
 
 exit:
-	return ret;
+	return 0;
 }
 
 static int akm09911_i2c_check_device(
@@ -1553,35 +1519,44 @@ static int akm09911_i2c_check_device(
 	struct akm_compass_data *akm = i2c_get_clientdata(client);
 	int err;
 
-	akm->sense_info[0] = AK09911_REG_WIA1;
-	err = akm_i2c_rxdata(client, akm->sense_info, AKM_SENSOR_INFO_SIZE);
-	if (err < 0)
+	s_akm->sense_info[0] = AK09911_REG_WIA1;
+	err = akm_i2c_rxdata(client, s_akm->sense_info, AKM_SENSOR_INFO_SIZE);
+	if (err < 0)	{
+		printk("[E-compass] %s AKM read info fail(%d)\n", __func__, err);
 		return err;
+	}
 
 	/* Set FUSE access mode */
-	err = AKECS_SetMode(akm, AK09911_MODE_FUSE_ACCESS);
-	if (err < 0)
+	err = AKECS_SetMode(s_akm, AK09911_MODE_FUSE_ACCESS);
+	if (err < 0)	{
+		printk("[E-compass] %s AKECS_SetMode fai(%d)\n", __func__, err);
 		return err;
+	}
 
 	akm->sense_conf[0] = AK09911_FUSE_ASAX;
 	err = akm_i2c_rxdata(client, akm->sense_conf, AKM_SENSOR_CONF_SIZE);
-	if (err < 0)
+	if (err < 0)	{
+		printk("[E-compass] %s AKM read config fai(%d)\n", __func__, err);
 		return err;
+	}
 
-	err = AKECS_SetMode(akm, AK09911_MODE_POWERDOWN);
-	if (err < 0)
+	err = AKECS_SetMode(s_akm, AK09911_MODE_POWERDOWN);
+	if (err < 0)	{
+		printk("[E-compass] %s AKECS_SetMode fail(%d)\n", __func__, err);
 		return err;
+	}
 
 	/* Check read data */
-	if ((akm->sense_info[0] != AK09911_WIA1_VALUE) ||
-			(akm->sense_info[1] != AK09911_WIA2_VALUE)){
+	if (akm->sense_info[0] != AKM_WIA_VALE) {
 		dev_err(&client->dev,
-			"%s: The device is not AKM Compass.", __func__);
+			"[E-compass] %s: The device is not AKM Compass.", __func__);
 		return -ENXIO;
 	}
 
 	return err;
 }
+
+
 
 static int akm_compass_power_set(struct akm_compass_data *data, bool on)
 {
@@ -1712,208 +1687,171 @@ reg_vdd_put:
 	return rc;
 }
 
-#ifdef CONFIG_OF
-static int akm_compass_parse_dt(struct device *dev,
-				struct akm_compass_data *akm)
+static int akm09911_pinctrl_init(struct akm_compass_data *s_akm)
 {
-	struct device_node *np = dev->of_node;
-	u32 temp_val;
-	int rc;
+	struct i2c_client *client = s_akm->i2c;
 
-	rc = of_property_read_u32(np, "akm,layout", &temp_val);
-	if (rc && (rc != -EINVAL)) {
-		dev_err(dev, "Unable to read akm,layout\n");
-		return rc;
-	} else {
-		akm->layout = temp_val;
-	}
-
-	akm->auto_report = of_property_read_bool(np, "akm,auto-report");
-	akm->use_hrtimer = of_property_read_bool(np, "akm,use-hrtimer");
-	akm->gpio_rstn = of_get_named_gpio_flags(dev->of_node,
-			"akm,gpio_rstn", 0, NULL);
-
-	if (!gpio_is_valid(akm->gpio_rstn)) {
-		dev_err(dev, "gpio reset pin %d is invalid.\n",
-			akm->gpio_rstn);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-#else
-static int akm_compass_parse_dt(struct device *dev,
-				struct akm_compass_data *akm)
-{
-	return -EINVAL;
-}
-#endif /* !CONFIG_OF */
-
-static int akm_pinctrl_init(struct akm_compass_data *akm)
-{
-	struct i2c_client *client = akm->i2c;
-
-	akm->pinctrl = devm_pinctrl_get(&client->dev);
-	if (IS_ERR_OR_NULL(akm->pinctrl)) {
+	s_akm->pinctrl = devm_pinctrl_get(&client->dev);
+	if (IS_ERR_OR_NULL(s_akm->pinctrl)) {
 		dev_err(&client->dev, "Failed to get pinctrl\n");
-		return PTR_ERR(akm->pinctrl);
+		return PTR_ERR(s_akm->pinctrl);
 	}
 
-	akm->pin_default = pinctrl_lookup_state(akm->pinctrl, "default");
-	if (IS_ERR_OR_NULL(akm->pin_default)) {
+	s_akm->pin_default = pinctrl_lookup_state(s_akm->pinctrl,
+			"default");
+	if (IS_ERR_OR_NULL(s_akm->pin_default)) {
 		dev_err(&client->dev, "Failed to look up default state\n");
-		return PTR_ERR(akm->pin_default);
+		return PTR_ERR(s_akm->pin_default);
 	}
 
-	akm->pin_sleep = pinctrl_lookup_state(akm->pinctrl, "sleep");
-	if (IS_ERR_OR_NULL(akm->pin_sleep)) {
+	s_akm->pin_sleep = pinctrl_lookup_state(s_akm->pinctrl,
+			"sleep");
+	if (IS_ERR_OR_NULL(s_akm->pin_sleep)) {
 		dev_err(&client->dev, "Failed to look up sleep state\n");
-		return PTR_ERR(akm->pin_sleep);
+		return PTR_ERR(s_akm->pin_sleep);
 	}
 
 	return 0;
 }
 
-static int akm_report_data(struct akm_compass_data *akm)
-{
-	uint8_t dat_buf[AKM_SENSOR_DATA_SIZE];/* for GET_DATA */
-	int ret;
-	int mag_x, mag_y, mag_z;
-	int tmp;
 
-	ret = AKECS_GetData_Poll(akm, dat_buf, AKM_SENSOR_DATA_SIZE);
-	if (ret) {
-		dev_err(&akm->i2c->dev, "Get data failed.\n");
-		return -EIO;
-	}
 
-	if (STATUS_ERROR(dat_buf[8])) {
-		dev_warn(&akm->i2c->dev, "Status error. Reset...\n");
-		AKECS_Reset(akm, 0);
-		return -EIO;
-	}
 
-	tmp = (int)((int16_t)(dat_buf[2]<<8)+((int16_t)dat_buf[1]));
-	tmp = tmp * akm->sense_conf[0] / 128 + tmp;
-	mag_x = tmp;
+#if AKM_ATTR_ATD_TEST
+//	add the attr for ATD Test
+static ssize_t get_akm09911_state(struct device *dev, struct device_attribute *devattr, char *buf)
+{	
 
-	tmp = (int)((int16_t)(dat_buf[4]<<8)+((int16_t)dat_buf[3]));
-	tmp = tmp * akm->sense_conf[1] / 128 + tmp;
-	mag_y = tmp;
+//	struct i2c_client *client = to_i2c_client(dev);
+//	struct akm_compass_data *akm = i2c_get_clientdata(client);
+	int ak09911_wia = 0;
+	int err=0;
 
-	tmp = (int)((int16_t)(dat_buf[6]<<8)+((int16_t)dat_buf[5]));
-	tmp = tmp * akm->sense_conf[2] / 128 + tmp;
-	mag_z = tmp;
-
-	dev_dbg(&akm->i2c->dev, "mag_x:%d mag_y:%d mag_z:%d\n",
-			mag_x, mag_y, mag_z);
-	dev_dbg(&akm->i2c->dev, "raw data: %d %d %d %d %d %d %d %d\n",
-			dat_buf[0], dat_buf[1], dat_buf[2], dat_buf[3],
-			dat_buf[4], dat_buf[5], dat_buf[6], dat_buf[7]);
-	dev_dbg(&akm->i2c->dev, "asa: %d %d %d\n", akm->sense_conf[0],
-			akm->sense_conf[1], akm->sense_conf[2]);
-
-	switch (akm->layout) {
-	case 0:
-	case 1:
-		/* Fall into the default direction */
-		break;
-	case 2:
-		tmp = mag_x;
-		mag_x = mag_y;
-		mag_y = -tmp;
-		break;
-	case 3:
-		mag_x = -mag_x;
-		mag_y = -mag_y;
-		break;
-	case 4:
-		tmp = mag_x;
-		mag_x = -mag_y;
-		mag_y = tmp;
-		break;
-	case 5:
-		mag_x = -mag_x;
-		mag_z = -mag_z;
-		break;
-	case 6:
-		tmp = mag_x;
-		mag_x = mag_y;
-		mag_y = tmp;
-		mag_z = -mag_z;
-		break;
-	case 7:
-		mag_y = -mag_y;
-		mag_z = -mag_z;
-		break;
-	case 8:
-		tmp = mag_x;
-		mag_x = -mag_y;
-		mag_y = -tmp;
-		mag_z = -mag_z;
-		break;
-	}
-
-	input_report_abs(akm->input, ABS_X, mag_x);
-	input_report_abs(akm->input, ABS_Y, mag_y);
-	input_report_abs(akm->input, ABS_Z, mag_z);
-
-	/* avoid eaten by input subsystem framework */
-	if ((mag_x == akm->last_x) && (mag_y == akm->last_y) &&
-			(mag_z == akm->last_z))
-		input_report_abs(akm->input, ABS_MISC, akm->rep_cnt++);
-
-	akm->last_x = mag_x;
-	akm->last_y = mag_y;
-	akm->last_z = mag_z;
-
-	input_sync(akm->input);
-
-	return 0;
+	s_akm->sense_info[0] = AK09911_REG_WIA1;
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] alp : get_akm09911_state 1+\n");
+	err = akm_i2c_rxdata(s_akm->i2c, s_akm->sense_info, AKM_SENSOR_INFO_SIZE);
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] alp : get_akm09911_state 1-\n");
+	if (err < 0)
+		if (s_akm->compass_debug_switch)
+			printk("get_akm09911_state wia : %d\n", err);
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] get_akm09911_state wia : %d, %d\n", s_akm->sense_info[0], s_akm->sense_info[1]);
+	if (s_akm->sense_info[0] == 72)
+		ak09911_wia =  1;
+	else
+		ak09911_wia =  0;
+	return sprintf(buf, "%d\n",ak09911_wia);
 }
 
-static void akm_dev_poll(struct work_struct *work)
+static ssize_t get_akm09911_rawdata(struct device *dev, struct device_attribute *devattr, char *buf)
+{	
+//	struct i2c_client *client = to_i2c_client(dev);
+//	struct akm_compass_data *akm = i2c_get_clientdata(client);
+	uint8_t buffer[AKM_SENSOR_DATA_SIZE];
+	int retval = 0, err=0;
+	int rawdata_x=0,rawdata_y=0,rawdata_z=0;
+
+	s_akm->sense_info[0] = AK09911_REG_CNTL1;
+	err = akm_i2c_rxdata(s_akm->i2c, s_akm->sense_info, 1);
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] get_akm09911_rawdata CNTL1 : (%d)\n", s_akm->sense_info[0]);
+	if (err < 0)	{
+		printk("[E-compass] akm_i2c_rxdata AKM_REG_STATUS read fail\n");
+		return retval;
+	}
+	if (s_akm->sense_info[0] == 0)	{
+		err = AKECS_SetMode(s_akm, AK09911_MODE_SNG_MEASURE);
+		if (err < 0)
+			printk("[E-compass] get_akm09911_rawdata AK09911_MODE_SNG_MEASURE fail\n");
+	} else	{
+		err = AKECS_SetMode(s_akm, AK09911_MODE_POWERDOWN);
+		if (err < 0)
+			printk("[E-compass] get_akm09911_rawdata AK09911_MODE_POWERDOWN fail\n");
+		msleep(50);
+		err = AKECS_SetMode(s_akm, AK09911_MODE_SNG_MEASURE);
+		if (err < 0)
+			printk("[E-compass] get_akm09911_rawdata AK09911_MODE_SNG_MEASURE fail\n");
+	}
+	// Read whole data and rest data
+	buffer[0] = AKM_REG_STATUS ;
+	err = akm_i2c_rxdata(s_akm->i2c, buffer, AKM_SENSOR_DATA_SIZE);
+	if (err < 0)	{
+		printk("[E-compass] akm_i2c_rxdata AKM_REG_STATUS+1 fail\n");
+		return retval;
+	}
+
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] rawdataX : (%d) | (%d)\n", buffer[1], buffer[2]);
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] rawdataY : (%d) | (%d)\n", buffer[3], buffer[4]);
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] rawdataZ : (%d) | (%d)\n", buffer[5], buffer[6]);
+	rawdata_x = ( buffer[1] | (buffer[2]<<8) );
+	rawdata_y = ( buffer[3] | (buffer[4]<<8) );
+	rawdata_z = ( buffer[5] | (buffer[6]<<8) );
+
+	if (rawdata_x > 0x7FFF)
+		rawdata_x = rawdata_x-0x10000;
+	if (rawdata_y > 0x7FFF)
+		rawdata_y = rawdata_y-0x10000;
+	if (rawdata_z > 0x7FFF)
+		rawdata_z = rawdata_z-0x10000;
+	if (s_akm->compass_debug_switch)
+		printk("[E-compass] Rawdata : (%d), (%d), (%d)\n", rawdata_x, rawdata_y, rawdata_z);
+
+	return sprintf(buf, "[E-compass] Rawdata : %d , %d , %d\n", rawdata_x, rawdata_y, rawdata_z);
+}
+static DEVICE_ATTR(state, S_IRUGO, get_akm09911_state, NULL);
+static DEVICE_ATTR(rawdata, S_IRUGO, get_akm09911_rawdata, NULL);
+#endif
+/*
+static ssize_t get_akm09911_debug_state(struct device *dev, struct device_attribute *devattr, char *buf)
 {
-	struct akm_compass_data *akm;
-	int ret;
-
-	akm = container_of((struct delayed_work *)work,
-			struct akm_compass_data,  dwork);
-
-	ret = akm_report_data(akm);
-	if (ret < 0)
-		dev_warn(&akm->i2c->dev, "Failed to report data\n");
-
-	if (!akm->use_hrtimer)
-		queue_delayed_work(akm->work_queue, &akm->dwork,
-			(unsigned long)nsecs_to_jiffies64(
-				akm->delay[MAG_DATA_FLAG]));
+	return sprintf(buf, "[E-compass] switch : %s\n", (s_akm->compass_debug_switch ? "on" : "off"));
 }
 
-static enum hrtimer_restart akm_timer_func(struct hrtimer *timer)
+static ssize_t Set_akm09911_debug_state(struct device *dev, struct device_attribute *devattr, const char *buf, size_t count)
 {
-	struct akm_compass_data *akm;
+	char debugStr[12];
 
-	akm = container_of(timer, struct akm_compass_data, poll_timer);
+	memset(debugStr, 0, 12);
+	strncpy(debugStr, buf, count);
+	s_akm->compass_debug_switch = (simple_strtoul(&debugStr[0], NULL, 10) ? true : false);
 
-	queue_work(akm->work_queue, &akm->dwork.work);
-	hrtimer_forward_now(&akm->poll_timer,
-			ns_to_ktime(akm->delay[MAG_DATA_FLAG]));
-
-	return HRTIMER_RESTART;
+	return sprintf(buf, "[E-compass] switch : %s\n", (s_akm->compass_debug_switch ? "on" : "off"));
 }
+static DEVICE_ATTR(akm09911_debug_state, 770, get_akm09911_debug_state, Set_akm09911_debug_state);
+*/
+
+static struct attribute *akm09911_attributes[] = {
+#if AKM_ATTR_ATD_TEST
+	&dev_attr_state.attr,
+	&dev_attr_rawdata.attr,
+#endif
+	//&dev_attr_akm09911_debug_state.attr,
+	NULL
+};
+
+static struct attribute_group akm09911_attribute_group = {
+	.attrs = akm09911_attributes
+};
 
 int akm_compass_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
-	struct akm09911_platform_data *pdata;
 	int err = 0;
-	int i;
 
-	dev_dbg(&client->dev, "start probing.");
+	struct device *dev = &client->dev;
+	struct device_node *np = dev->of_node;
+
+//	dev_dbg(&client->dev, "start probing.");
+	printk(KERN_INFO "[Progress][%s] Probe starts \n", AKM_I2C_NAME);
+	printk("[E-compass] alp akm_compass_probe ++\n");
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
 		dev_err(&client->dev,
-				"%s: check_functionality failed.", __func__);
+				"[E-compass] %s: check_functionality failed.", __func__);
 		err = -ENODEV;
 		goto exit0;
 	}
@@ -1922,7 +1860,7 @@ int akm_compass_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	s_akm = kzalloc(sizeof(struct akm_compass_data), GFP_KERNEL);
 	if (!s_akm) {
 		dev_err(&client->dev,
-				"%s: memory allocation failed.", __func__);
+				"[E-compass] %s: memory allocation failed.", __func__);
 		err = -ENOMEM;
 		goto exit1;
 	}
@@ -1932,166 +1870,154 @@ int akm_compass_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	init_waitqueue_head(&s_akm->open_wq);
 
 	mutex_init(&s_akm->sensor_mutex);
-	mutex_init(&s_akm->accel_mutex);
 	mutex_init(&s_akm->val_mutex);
 	mutex_init(&s_akm->op_mutex);
 
 	atomic_set(&s_akm->active, 0);
 	atomic_set(&s_akm->drdy, 0);
 
+	/* ASUS BSP Peter_Lu for E-compass Debug & ATD tool */
+	s_akm->compass_debug_switch = false;
+
+	s_akm->is_busy = 0;
 	s_akm->enable_flag = 0;
+	s_akm->delay = -1;
 
-	/* Set to 1G in Android coordination, AKSC format */
-	s_akm->accel_data[0] = 0;
-	s_akm->accel_data[1] = 0;
-	s_akm->accel_data[2] = 720;
 
-	for (i = 0; i < AKM_NUM_SENSORS; i++)
-		s_akm->delay[i] = -1;
+	
+	s_akm->gpio_rstn  = of_get_named_gpio(np, "akm,gpio_rstn", 0);
 
-	if (client->dev.of_node) {
-		err = akm_compass_parse_dt(&client->dev, s_akm);
-		if (err) {
-			dev_err(&client->dev,
-				"Unable to parse platfrom data err=%d\n", err);
-			goto exit2;
-		}
-	} else {
-		if (client->dev.platform_data) {
-			/* Copy platform data to local. */
-			pdata = client->dev.platform_data;
-			s_akm->layout = pdata->layout;
-			s_akm->gpio_rstn = pdata->gpio_RSTN;
-		} else {
-		/* Platform data is not available.
-		   Layout and information should be set by each application. */
-			s_akm->layout = 0;
-			s_akm->gpio_rstn = 0;
-			dev_warn(&client->dev, "%s: No platform data.",
-				__func__);
-		}
-	}
+	printk("[E-compass] alp : akm09911 gpio_RSTN =%d \n", s_akm->gpio_rstn);
+
+	err = gpio_request(s_akm->gpio_rstn, "ECOMP_RST#");
+	if (err)
+		pr_err("[E-compass] %s: unable to request gpio %d (ECOMP_RST#)\n", __func__, s_akm->gpio_rstn);
+
+	err = gpio_direction_output(s_akm->gpio_rstn, 1);
+	if (err < 0)
+		pr_err("[E-compass] %s: unable to set the direction of gpio %d\n", __func__, s_akm->gpio_rstn);
+
+	s_akm->layout = 0;
 
 	/***** I2C initialization *****/
 	s_akm->i2c = client;
 	/* set client data */
 	i2c_set_clientdata(client, s_akm);
 
+
+	/* check connection */
+
+	err = akm_compass_power_init(s_akm, true);
+	if (err < 0){
+		pr_err("[E-compass] %s: fail\n", __func__);
+		goto exit1;
+	}
+	err = akm_compass_power_set(s_akm, true);
+	if (err < 0){
+		pr_err("[E-compass] %s: fail\n", __func__);
+		goto err_compass_pwr_init;
+	}
+
 	/* initialize pinctrl */
-	if (!akm_pinctrl_init(s_akm)) {
+	if (!akm09911_pinctrl_init(s_akm)) {
 		err = pinctrl_select_state(s_akm->pinctrl, s_akm->pin_default);
 		if (err) {
 			dev_err(&client->dev, "Can't select pinctrl state\n");
-			goto exit2;
+			goto err_compass_pwr_off;
 		}
 	}
-
-	/* Pull up the reset pin */
-	AKECS_Reset(s_akm, 1);
-
-	/* check connection */
-	err = akm_compass_power_init(s_akm, 1);
-	if (err < 0)
-		goto exit2;
-	err = akm_compass_power_set(s_akm, 1);
-	if (err < 0)
-		goto exit3;
-
-	err = akm09911_i2c_check_device(client);
-	if (err < 0)
-		goto exit4;
 
 	/***** input *****/
 	err = akm_compass_input_init(&s_akm->input);
 	if (err) {
 		dev_err(&client->dev,
 			"%s: input_dev register failed", __func__);
-		goto exit4;
+		goto err_compass_pwr_off;
 	}
 	input_set_drvdata(s_akm->input, s_akm);
 
 	/***** IRQ setup *****/
-	s_akm->irq = client->irq;
+	/*
+	 * ASUS +++ Peter_Lu Did not use irq , daemon control
+	 * s_akm->irq = client->irq;
+	 */
+	s_akm->irq = 0;
 
-	dev_dbg(&client->dev, "%s: IRQ is #%d.",
-			__func__, s_akm->irq);
+	dev_dbg(&client->dev, "[E-compass] %s: IRQ is #%d.", __func__, s_akm->irq);
 
 	if (s_akm->irq) {
 		err = request_threaded_irq(
 				s_akm->irq,
 				NULL,
 				akm_compass_irq,
-				IRQF_TRIGGER_HIGH|IRQF_ONESHOT,
-				dev_name(&client->dev),
+				IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+				"akm09911-irq",//dev_name(&client->dev),
 				s_akm);
 		if (err < 0) {
-			dev_err(&client->dev,
-				"%s: request irq failed.", __func__);
-			goto exit5;
+			if (s_akm->compass_debug_switch)
+				printk("[E-compass] alp enable_irq fail err =%d \n", err);
+			goto exit4;
 		}
-	} else if (s_akm->auto_report) {
-		if (s_akm->use_hrtimer) {
-			hrtimer_init(&s_akm->poll_timer, CLOCK_MONOTONIC,
-					HRTIMER_MODE_REL);
-			s_akm->poll_timer.function = akm_timer_func;
-			s_akm->work_queue = alloc_workqueue("akm_poll_work",
-				WQ_UNBOUND | WQ_MEM_RECLAIM | WQ_HIGHPRI, 1);
-			INIT_WORK(&s_akm->dwork.work, akm_dev_poll);
-		} else {
-			s_akm->work_queue = alloc_workqueue("akm_poll_work",
-					WQ_NON_REENTRANT, 0);
-			INIT_DELAYED_WORK(&s_akm->dwork, akm_dev_poll);
-		}
+	}else{
+		printk("[E-compass] alp : did not use irq , daemon control!! \n");
 	}
 
 	/***** misc *****/
 	err = misc_register(&akm_compass_dev);
 	if (err) {
 		dev_err(&client->dev,
-			"%s: akm_compass_dev register failed", __func__);
-		goto exit6;
+			"[E-compass] %s: akm_compass_dev register failed", __func__);
+		goto exit5;
 	}
 
 	/***** sysfs *****/
 	err = create_sysfs_interfaces(s_akm);
 	if (0 > err) {
 		dev_err(&client->dev,
-			"%s: create sysfs failed.", __func__);
-		goto exit7;
+			"[E-compass] %s: create sysfs failed.", __func__);
+		goto exit6;
 	}
 
-	s_akm->cdev = sensors_cdev;
-	s_akm->cdev.sensors_enable = akm_enable_set;
-	s_akm->cdev.sensors_poll_delay = akm_poll_delay_set;
-
-	s_akm->delay[MAG_DATA_FLAG] = sensors_cdev.delay_msec * 1000000;
-
-	err = sensors_classdev_register(&client->dev, &s_akm->cdev);
-
+	err = sysfs_create_group(&client->dev.kobj,&akm09911_attribute_group);
 	if (err) {
-		dev_err(&client->dev, "class device create failed: %d\n", err);
-		goto exit8;
+		 printk("[E-compass] alp : sysfs_create_group fail\n");
 	}
 
-	akm_compass_power_set(s_akm, false);
+#ifdef CONFIG_I2C_STRESS_TEST
+	printk("[I2CST] Compass Senor add test case\n");
+	i2c_add_test_case(client, "CompassSensorTest", ARRAY_AND_SIZE(CompassSensorTestCaseInfo));
+#endif
 
-	dev_info(&client->dev, "successfully probed.");
+	/* check connection */
+	err = akm09911_i2c_check_device(client);
+	if (err < 0)
+		goto exit1;
+
+//<asus-annacheng20150129>>>>>>>>>>>>>>>>>>>>>>>+
+	if(create_asusproc_compasssensor_status_entry())
+		printk("[%s] : ERROR to create compasssensor proc entry\n",__func__);
+//<asus-annacheng20150129><<<<<<<<<<<<<<<<<+
+//	dev_info(&client->dev, "successfully probed.");
+	printk("[E-compass] alp akm_compass_probe --\n");
+	printk(KERN_INFO "[Progress][%s] Probe ends \n", AKM_I2C_NAME);
+	
 	return 0;
 
-exit8:
-	remove_sysfs_interfaces(s_akm);
-exit7:
-	misc_deregister(&akm_compass_dev);
 exit6:
+	misc_deregister(&akm_compass_dev);
+exit5:
 	if (s_akm->irq)
 		free_irq(s_akm->irq, s_akm);
-exit5:
-	input_unregister_device(s_akm->input);
 exit4:
-	akm_compass_power_set(s_akm, 0);
-exit3:
-	akm_compass_power_init(s_akm, 0);
-exit2:
+	input_unregister_device(s_akm->input);
+
+
+err_compass_pwr_off:
+	akm_compass_power_set(s_akm, false);
+err_compass_pwr_init:
+	akm_compass_power_init(s_akm, false);
+
+//exit3:
 	kfree(s_akm);
 exit1:
 exit0:
@@ -2102,31 +2028,29 @@ static int akm_compass_remove(struct i2c_client *client)
 {
 	struct akm_compass_data *akm = i2c_get_clientdata(client);
 
-	if (akm->auto_report) {
-		if (akm->use_hrtimer) {
-			hrtimer_cancel(&akm->poll_timer);
-			cancel_work_sync(&akm->dwork.work);
-		} else {
-			cancel_delayed_work_sync(&akm->dwork);
-		}
-		destroy_workqueue(akm->work_queue);
-	}
+	if (akm_compass_power_set(akm, false))
+		dev_err(&client->dev, "power off failed.\n");
+	if (akm_compass_power_init(akm, false))
+		dev_err(&client->dev, "power deinit failed.\n");
 
-	if (akm_compass_power_set(akm, 0))
-		dev_err(&client->dev, "power set failed.");
-	if (akm_compass_power_init(akm, 0))
-		dev_err(&client->dev, "power deinit failed.");
 	remove_sysfs_interfaces(akm);
-	sensors_classdev_unregister(&akm->cdev);
 	if (misc_deregister(&akm_compass_dev) < 0)
 		dev_err(&client->dev, "misc deregister failed.");
 	if (akm->irq)
 		free_irq(akm->irq, akm);
 	input_unregister_device(akm->input);
 	kfree(akm);
+#if AKM_ATTR_ATD_TEST
+	sysfs_remove_group(&client->dev.kobj, &akm09911_attribute_group);
+#endif
 	dev_info(&client->dev, "successfully removed.");
 	return 0;
 }
+
+static struct of_device_id akm_compass_match_table[] = {
+	{ .compatible = "ak,ak09911",},
+	{ },
+};
 
 static const struct i2c_device_id akm_compass_id[] = {
 	{AKM_I2C_NAME, 0 },
@@ -2138,34 +2062,36 @@ static const struct dev_pm_ops akm_compass_pm_ops = {
 	.resume		= akm_compass_resume,
 };
 
-static struct of_device_id akm09911_match_table[] = {
-	{ .compatible = "ak,ak09911", },
-	{ .compatible = "akm,akm09911", },
-	{ },
-};
-
 static struct i2c_driver akm_compass_driver = {
 	.probe		= akm_compass_probe,
 	.remove		= akm_compass_remove,
 	.id_table	= akm_compass_id,
 	.driver = {
 		.name	= AKM_I2C_NAME,
-		.owner  = THIS_MODULE,
-		.of_match_table = akm09911_match_table,
+		.owner		= THIS_MODULE,
+		.of_match_table	= akm_compass_match_table,
 		.pm		= &akm_compass_pm_ops,
 	},
 };
 
 static int __init akm_compass_init(void)
 {
-	pr_info("AKM compass driver: initialize.");
-	return i2c_add_driver(&akm_compass_driver);
+	int res = 0;
+	pr_info("[E-compass] AKM compass driver: initialize.\n");
+	res = i2c_add_driver(&akm_compass_driver);
+	if (res != 0)
+		printk("[E-compass] I2c_add_driver fail, Error : %d\n", res);
+	return res;
 }
 
 static void __exit akm_compass_exit(void)
 {
 	pr_info("AKM compass driver: release.");
 	i2c_del_driver(&akm_compass_driver);
+	//<asus-annacheng20150129>>>>>>>>>>>>>>>>>>+
+	if(compasssensor_entry)
+		remove_proc_entry("compasssensor_status", NULL);
+	//<asus-annacheng20150129><<<<<<<<<<<<<<<<<+
 }
 
 module_init(akm_compass_init);
@@ -2174,4 +2100,3 @@ module_exit(akm_compass_exit);
 MODULE_AUTHOR("viral wang <viral_wang@htc.com>");
 MODULE_DESCRIPTION("AKM compass driver");
 MODULE_LICENSE("GPL");
-

@@ -87,6 +87,9 @@
 #include "../workqueue_internal.h"
 #include "../smpboot.h"
 
+#include <linux/asus_global.h>
+extern struct _asus_global asus_global;
+extern struct completion fake_completion;
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
 
@@ -1224,8 +1227,6 @@ __read_mostly unsigned int sched_ravg_window = 10000000;
 unsigned int __read_mostly sched_disable_window_stats;
 
 static unsigned int sync_cpu;
-static u64 sched_init_jiffy;
-static u64 sched_clock_at_init_jiffy;
 
 #define EXITING_TASK_MARKER	0xdeaddead
 
@@ -1897,23 +1898,16 @@ static inline void mark_task_starting(struct task_struct *p)
 	p->ravg.mark_start = wallclock;
 }
 
-static int update_alignment;
-
 static inline void set_window_start(struct rq *rq)
 {
 	int cpu = cpu_of(rq);
 	struct rq *sync_rq = cpu_rq(sync_cpu);
 
-	if (cpu == sync_cpu && !update_alignment) {
-		sched_init_jiffy = get_jiffies_64();
-		sched_clock_at_init_jiffy = sched_clock();
-	}
-
 	if (rq->window_start || !sched_enable_hmp)
 		return;
 
 	if (cpu == sync_cpu) {
-		rq->window_start = sched_clock_at_init_jiffy;
+		rq->window_start = sched_clock();
 	} else {
 		raw_spin_unlock(&rq->lock);
 		double_rq_lock(rq, sync_rq);
@@ -2146,20 +2140,29 @@ void sched_set_io_is_busy(int val)
 
 int sched_set_window(u64 window_start, unsigned int window_size)
 {
-	u64 ws, now;
+	u64 now, cur_jiffies, jiffy_sched_clock;
+	s64 ws;
+	unsigned long flags;
 
 	if (sched_use_pelt ||
 		 (window_size * TICK_NSEC <  MIN_SCHED_RAVG_WINDOW))
 			return -EINVAL;
 
 	mutex_lock(&policy_mutex);
-	update_alignment = 1;
 
-	ws = (window_start - sched_init_jiffy); /* jiffy difference */
+	/* Get a consistent view of sched_clock, jiffies, and the time
+	 * since the last jiffy (based on last_jiffies_update). */
+	local_irq_save(flags);
+	cur_jiffies = jiffy_to_sched_clock(&now, &jiffy_sched_clock);
+	local_irq_restore(flags);
+
+	/* translate window_start from jiffies to nanoseconds */
+	ws = (window_start - cur_jiffies); /* jiffy difference */
 	ws *= TICK_NSEC;
-	ws += sched_clock_at_init_jiffy;
+	ws += jiffy_sched_clock;
 
-	now = sched_clock();
+	/* roll back calculated window start so that it is in
+	 * the past (window stats must have a current window) */
 	while (ws > now)
 		ws -= (window_size * TICK_NSEC);
 
@@ -4677,6 +4680,28 @@ need_resched:
 		rq->curr = next;
 		++*switch_count;
 
+		switch (cpu) {
+			case 0:
+				asus_global.pprev_cpu0 = prev;
+				asus_global.pnext_cpu0 = next;
+	 			break;
+			case 1:
+				asus_global.pprev_cpu1 = prev;
+				asus_global.pnext_cpu1 = next;
+	 			break;
+			case 2:
+				asus_global.pprev_cpu2 = prev;
+				asus_global.pnext_cpu2 = next;
+	 			break;
+			case 3:
+				asus_global.pprev_cpu3 = prev;
+				asus_global.pnext_cpu3 = next;
+	 			break;
+			case 4:
+				asus_global.pprev_cpu0 = prev;
+				asus_global.pnext_cpu0 = next;
+	 			break;
+		}
 #ifdef CONFIG_ARCH_WANTS_CTXSW_LOGGING
 		dlog("%s: enter context_switch at %llu\n",
 						__func__, sched_clock());
@@ -4976,6 +5001,7 @@ do_wait_for_common(struct completion *x,
 
 		__add_wait_queue_tail_exclusive(&x->wait, &wait);
 		do {
+			task_thread_info(current)->pWaitingCompletion = x;
 			if (signal_pending_state(state, current)) {
 				timeout = -ERESTARTSYS;
 				break;
@@ -4985,6 +5011,7 @@ do_wait_for_common(struct completion *x,
 			timeout = action(timeout);
 			spin_lock_irq(&x->wait.lock);
 		} while (!x->done && timeout);
+		task_thread_info(current)->pWaitingCompletion = &fake_completion;
 		__remove_wait_queue(&x->wait, &wait);
 		if (!x->done)
 			return timeout;

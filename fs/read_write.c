@@ -22,6 +22,14 @@
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
 
+#include <linux/asus_fuse.h>
+			
+#ifdef LIMIT_SDCARD_SIZE
+#include <linux/statfs.h>
+#include <linux/mount.h>
+#include <linux/mmc/mmc.h>
+#endif
+
 typedef ssize_t (*io_fn_t)(struct file *, char __user *, size_t, loff_t *);
 typedef ssize_t (*iov_fn_t)(struct kiocb *, const struct iovec *,
 		unsigned long, loff_t);
@@ -425,6 +433,26 @@ ssize_t __kernel_write(struct file *file, const char *buf, size_t count, loff_t 
 	mm_segment_t old_fs;
 	const char __user *p;
 	ssize_t ret;
+
+#ifdef LIMIT_SDCARD_SIZE
+	struct kstatfs stat;
+	long long store = 0;
+	if(!memcmp(file->f_path.mnt->mnt_sb->s_type->name, "fuse", 5)){
+		store -= count;
+		if(store <= (data_free_size_th + CHECK_1TH*2)){
+			vfs_statfs(&file->f_path, &stat);
+			store = stat.f_bfree * stat.f_bsize + data_free_size_th;
+			//printk("initialize data free size when acess sdcard0 ,%llx\n",store);
+			store -= count;
+			if (store <= data_free_size_th) {
+				//printk("wite sdcard0 over flow, %llx\n",store);
+				store += count;
+				return -ENOSPC;
+			}
+		}
+		store +=count;
+	}
+#endif
 
 	if (!file->f_op || (!file->f_op->write && !file->f_op->aio_write))
 		return -EINVAL;

@@ -189,7 +189,7 @@ static int vkeys_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "unable to create kobject\n");
 		return -ENOMEM;
 	}
-
+	
 	ret = sysfs_create_group(vkey_obj, &vkey_grp);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to create attributes\n");

@@ -51,6 +51,8 @@
 
 #include "irqchip.h"
 
+int gic_irq_cnt,gic_resume_irq[8];//[Power]Add for wakeup debug
+
 union gic_base {
 	void __iomem *common_base;
 	void __percpu __iomem **percpu_base;
@@ -273,6 +275,12 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 	u32 enabled;
 	u32 pending[32];
 	void __iomem *base = gic_data_dist_base(gic);
+	//[+++][Power]Add for wakeup debug
+	int j;
+	for (j=0;j < 8; j++)
+		gic_resume_irq[j]=0;
+	gic_irq_cnt=0;
+	//[---][Power]Add for wakeup debug
 
 	if (!msm_show_resume_irq_mask)
 		return;
@@ -296,9 +304,17 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 		else if (desc->action && desc->action->name)
 			name = desc->action->name;
 
-		pr_warning("%s: %d triggered %s\n", __func__,
-					i + gic->irq_offset, name);
+		pr_warning("[PM]IRQ: %d triggered %s\n", i + gic->irq_offset, name);
+		//[+++][Power]Add for wakeup debug
+		if (gic_irq_cnt < 8)
+			gic_resume_irq[gic_irq_cnt]=i + gic->irq_offset;
+		gic_irq_cnt++;
+		//[---][Power]Add for wakeup debug
 	}
+	//[+++][Power]Add for wakeup debug
+	if (gic_irq_cnt >= 8)
+		gic_irq_cnt = 7;
+	//[---][Power]Add for wakeup debug
 }
 
 static void gic_resume_one(struct gic_chip_data *gic)

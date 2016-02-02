@@ -43,6 +43,11 @@
 #include "adreno.h"
 #include "kgsl_compat.h"
 
+//ASUS Joy_Lin +++
+#include <linux/proc_fs.h>
+#define ASUS_GPU_FILE "ASUS_SB"
+//ASUS Joy_Lin ---
+
 #undef MODULE_PARAM_PREFIX
 #define MODULE_PARAM_PREFIX "kgsl."
 
@@ -3274,6 +3279,23 @@ done:
 	return ret;
 }
 
+#ifdef CONFIG_ARM64
+/* Do not support full flush on ARM64 targets */
+static inline bool check_full_flush(size_t size, int op)
+{
+	return false;
+}
+#else
+/* Support full flush if the size is bigger than the threshold */
+static inline bool check_full_flush(size_t size, int op)
+{
+	/* If we exceed the breakeven point, flush the entire cache */
+	return (kgsl_driver.full_cache_threshold != 0) &&
+		(size >= kgsl_driver.full_cache_threshold) &&
+		(op == KGSL_GPUMEM_CACHE_FLUSH);
+}
+#endif
+
 /* New cache sync function - supports both directions (clean and invalidate) */
 
 long kgsl_ioctl_gpumem_sync_cache(struct kgsl_device_private *dev_priv,
@@ -3376,12 +3398,10 @@ long kgsl_ioctl_gpumem_sync_cache_bulk(struct kgsl_device_private *dev_priv,
 		entries[actual_count++] = entry;
 
 		/* If we exceed the breakeven point, flush the entire cache */
-		if (kgsl_driver.full_cache_threshold != 0 &&
-		    op_size >= kgsl_driver.full_cache_threshold &&
-		    param->op == KGSL_GPUMEM_CACHE_FLUSH) {
-			full_flush = true;
+		full_flush  = check_full_flush(op_size, param->op);
+		if (full_flush)
 			break;
-		}
+		
 		last_id = id;
 	}
 	if (full_flush) {
@@ -4436,6 +4456,56 @@ static irqreturn_t kgsl_irq_handler(int irq, void *data)
 
 }
 
+//ASUS Joy_Lin +++
+unsigned int asus_sb_enable = 0;
+static int readflag = 0;
+
+static ssize_t asus_proc_file_read_file(struct file *filp, char __user *buff, size_t len, loff_t *off)
+{
+	char print_buf[32];
+	unsigned int ret = 0,iret = 0;
+
+	sprintf(print_buf, "asusdebug: %s\n", asus_sb_enable? "on":"off");
+	ret = strlen(print_buf);
+	iret = copy_to_user(buff, print_buf, ret);
+	if (!readflag){
+		readflag = 1;
+		return ret;
+		}
+	else{
+		readflag = 0;
+		return 0;
+		}
+}
+
+static ssize_t asus_proc_file_write_file(struct file *filp, const char __user *buff, size_t len, loff_t *off)
+{
+	char messages[256];
+	memset(messages, 0, 256);
+	if (len > 256)
+		len = 256;
+	if (copy_from_user(messages, buff, len))
+		return -EFAULT;
+	if(strncmp(messages, "1", 1) == 0)
+	{
+		asus_sb_enable = 1;
+	}
+	else if(strncmp(messages, "0", 1) == 0)
+	{   
+		asus_sb_enable = 0;
+	}
+else
+	return 0;
+
+	return len;
+}
+
+static struct file_operations create_asus_proc_file = {
+	.read = asus_proc_file_read_file,
+	.write = asus_proc_file_write_file,
+};
+//ASUS Joy_Lin ---
+
 static const struct file_operations kgsl_fops = {
 	.owner = THIS_MODULE,
 	.release = kgsl_release,
@@ -4828,6 +4898,10 @@ static int __init kgsl_core_init(void)
 	}
 
 	kgsl_memfree_init();
+
+	//ASUS Joy_Lin +++
+	proc_create(ASUS_GPU_FILE, S_IRWXUGO, NULL, &create_asus_proc_file);
+	//ASUS Joy_Lin ---
 
 	return 0;
 

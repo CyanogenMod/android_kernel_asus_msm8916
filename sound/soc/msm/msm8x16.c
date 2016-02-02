@@ -52,6 +52,8 @@
 
 #define WCD_MBHC_DEF_RLOADS 5
 
+int g_gpio_audio_debug;/*steve_chen ++*/
+
 static int msm_btsco_rate = BTSCO_RATE_8KHZ;
 static int msm_btsco_ch = 1;
 
@@ -59,6 +61,19 @@ static int msm_ter_mi2s_tx_ch = 1;
 static int msm_pri_mi2s_rx_ch = 1;
 
 static int msm_proxy_rx_ch = 2;
+
+//<asus-yusheng20150420 add for dual-speaker path+++>
+atomic_t quat_mi2s_clk_ref;
+//<asus-yusheng20150420 add for dual-speaker path--->
+
+//<asus-yusheng20150519+> check quat mi2s clock is sending or not
+#include <linux/proc_fs.h>
+#ifndef QUAT_STATUS_PROC_FILE
+#define QUAT_STATUS_PROC_FILE "quatmi2s_status"
+static struct proc_dir_entry *quat_status_proc_file;
+static int quat_mi2s_status = 0; //0 means not running
+#endif
+//<asus-yusheng20150519-> check quat mi2s clock is sending or not
 
 static int msm8x16_enable_codec_ext_clk(struct snd_soc_codec *codec, int enable,
 					bool dapm);
@@ -202,6 +217,10 @@ struct cdc_pdm_pinctrl_info {
 	struct pinctrl_state *cdc_lines_act;
 	struct pinctrl_state *cross_conn_det_sus;
 	struct pinctrl_state *cross_conn_det_act;
+    //<asus-yusheng20150420 add for dual-speaker path+++>
+	struct pinctrl_state *quat_cdc_lines_sus;
+	struct pinctrl_state *quat_cdc_lines_act;
+	//<asus-yusheng20150420 add for dual-speaker path--->
 };
 
 struct ext_cdc_tlmm_pinctrl_info {
@@ -508,6 +527,102 @@ static int msm_mi2s_snd_hw_params(struct snd_pcm_substream *substream,
 	param_set_mask(params, SNDRV_PCM_HW_PARAM_FORMAT, mi2s_rx_bit_format);
 	return 0;
 }
+
+//<asus-yusheng20150420 add for dual-speaker path+++>
+int msm_q6_enable_mi2s_clocks(bool enable)
+{
+   union afe_port_config port_config;
+   int rc = 0;
+   pr_err("%s\n", __func__);
+   if(enable) {
+   
+		port_config.i2s.channel_mode = AFE_PORT_I2S_SD0;
+		port_config.i2s.mono_stereo = MSM_AFE_CH_STEREO;
+		port_config.i2s.data_format = 0;
+		port_config.i2s.bit_width = 16;
+		port_config.i2s.reserved = 0;
+		port_config.i2s.i2s_cfg_minor_version = AFE_API_VERSION_I2S_CONFIG;
+		port_config.i2s.sample_rate = 48000;
+		port_config.i2s.ws_src = 1;
+		
+		rc = afe_port_start(AFE_PORT_ID_QUATERNARY_MI2S_RX, &port_config,48000);
+		
+		if(IS_ERR_VALUE(rc)) {
+		  pr_err("%s: fail to open AFE port", __func__);
+		  return -EINVAL;
+		}
+        else {
+		   rc = afe_close(AFE_PORT_ID_QUATERNARY_MI2S_RX);
+		   if(IS_ERR_VALUE(rc)) {
+		    pr_err("%s: fail to open AFE port", __func__);
+		    return -EINVAL;
+		   }
+		}
+	}
+    return rc;
+}
+
+static int quat_mi2s_sclk_ctl(struct snd_pcm_substream *substream, bool enable)
+{
+	int ret = 0;
+        
+	if (enable) {
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+
+ 			 pr_debug("Enable STREAM_PLAYBACK %s\n", __func__);
+			
+			if (mi2s_rx_bit_format == SNDRV_PCM_FORMAT_S24_LE)
+				mi2s_rx_clk.clk_val1 =
+					Q6AFE_LPASS_IBIT_CLK_3_P072_MHZ;
+			else
+				mi2s_rx_clk.clk_val1 =
+					Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ;
+			ret = afe_set_lpass_clock(AFE_PORT_ID_QUATERNARY_MI2S_RX,
+						  &mi2s_rx_clk);
+						  
+	     //<asus yusheng patch for sending the clk immediately while the pcm opening>
+	    if (ret < 0 ) {
+               pr_err("%s: afe_set_lpass_clock failed.\n", __func__);
+			   return ret;
+            }
+		  /*Currently remove the quat mi2s clocks(BCLK&WS) sending, after qcom check
+		    this function msm_q6_enable_mi2s_clocks is correct to send WS clocks. */
+	      //msm_q6_enable_mi2s_clocks(1);
+         //<asus yusheng patch for sending the clk immediately while the pcm opening>			
+						  
+		}else if(substream->stream == SNDRV_PCM_STREAM_CAPTURE){
+		
+			mi2s_tx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_1_P536_MHZ;
+			ret = afe_set_lpass_clock(
+				AFE_PORT_ID_QUATERNARY_MI2S_TX,
+				&mi2s_tx_clk);
+
+		}else
+			pr_err("%s:Not valid substream.\n", __func__);
+
+		if (ret < 0)
+			pr_err("%s:afe_set_lpass_clock failed\n", __func__);
+
+	} else {
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+			pr_debug("Disable STREAM_PLAYBACK %s\n", __func__);
+			mi2s_rx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_DISABLE;
+			ret = afe_set_lpass_clock(AFE_PORT_ID_QUATERNARY_MI2S_RX,
+						  &mi2s_rx_clk);
+		}else if(substream->stream == SNDRV_PCM_STREAM_CAPTURE){
+			mi2s_tx_clk.clk_val1 = Q6AFE_LPASS_IBIT_CLK_DISABLE;
+			ret = afe_set_lpass_clock(
+				AFE_PORT_ID_QUATERNARY_MI2S_TX,
+				&mi2s_tx_clk);
+		}else
+			pr_err("%s:Not valid substream.\n", __func__);
+
+		if (ret < 0)
+			pr_err("%s:afe_set_lpass_clock failed\n", __func__);
+	}
+	return ret;
+}
+//<asus-yusheng20150420 add for dual-speaker path--->
 
 static int sec_mi2s_sclk_ctl(struct snd_pcm_substream *substream, bool enable)
 {
@@ -952,6 +1067,191 @@ static void msm_sec_mi2s_snd_shutdown(struct snd_pcm_substream *substream)
 	}
 }
 
+//<asus-yusheng20150420 add for dual-speaker path+++>
+static int conf_int_codec_mux_quat(struct msm8916_asoc_mach_data *pdata)
+{
+	int ret = 0;
+	int val = 0;
+	void __iomem *vaddr = NULL;
+
+	vaddr = ioremap(LPASS_CSR_GP_IO_MUX_SPKR_CTL , 4);
+	if (!vaddr) {
+		pr_err("%s ioremap failure for addr %x",
+			__func__, LPASS_CSR_GP_IO_MUX_SPKR_CTL);
+		return -ENOMEM;
+	}
+	/* enable sec MI2S interface to TLMM GPIO */
+	val = ioread32(vaddr);
+	val = val | 0x00000002;
+	iowrite32(val, vaddr);
+	iounmap(vaddr);
+	vaddr = ioremap(LPASS_CSR_GP_IO_MUX_MIC_CTL , 4);
+	if (!vaddr) {
+		pr_err("%s ioremap failure for addr %x",
+				__func__, LPASS_CSR_GP_IO_MUX_MIC_CTL);
+		return -ENOMEM;
+	}
+	/* enable QUAT MI2S interface to TLMM GPIO */
+	val = ioread32(vaddr);
+	//<asus-yusheng20150506 solving concurrency issue between Tertiary and Quaternary for dual spk+>
+	val = val | 0x0002000E; 
+	//val = val | 0x02020002; //<asus yusheng from patch case:01963479
+	//<asus-yusheng20150506 solving concurrency issue between Tertiary and Quaternary for dual spk->
+	pr_debug("%s: QUAT mux configuration = %x\n", __func__, val);
+	iowrite32(val, vaddr);
+	iounmap(vaddr);
+	return ret;
+}
+
+
+static int msm_quat_mi2s_snd_startup(struct snd_pcm_substream *substream)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_card *card = rtd->card;
+	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+	//<asus-yusheng20150626+> Qualcomm suggest remove MCLK enable setting from case:02066608
+	//struct snd_soc_codec *codec = rtd->codec;
+	//<asus-yusheng20150626-> Qualcomm suggest remove MCLK enable setting from case:02066608
+	struct msm8916_asoc_mach_data *pdata =
+			snd_soc_card_get_drvdata(card);
+	int ret = 0;
+	
+	pr_debug("%s(): substream = %s  stream = %d\n", __func__,
+				substream->name, substream->stream);
+
+	/*if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
+		pr_info("%s: Quaternary Mi2s does not support capture\n",
+					__func__);
+		return 0;
+	}
+	*/
+	
+	if (!pdata->codec_type &&
+			((pdata->ext_pa & QUAT_MI2S_ID) == QUAT_MI2S_ID)) {
+		ret = conf_int_codec_mux_quat(pdata);
+		if (ret < 0) {
+			pr_err("%s: failed to conf internal codec mux\n",
+							__func__);
+			return ret;
+		}
+		
+		//<asus-yusheng20150626+> Qualcomm suggest remove MCLK enable setting from case:02066608
+		//Because ZE600KL use the GPIO 116 to be Camera power pin , the mclk enable could remove
+		//ret = msm8x16_enable_codec_ext_clk(codec, 1, true);
+		//if (ret < 0) {
+			//pr_err("failed to enable mclk\n");
+			//return ret;
+		//}
+		//<asus-yusheng20150626-> Qualcomm suggest remove MCLK enable setting from case:02066608
+		
+		ret = quat_mi2s_sclk_ctl(substream, true);
+		if (ret < 0) {
+			pr_err("failed to enable sclk\n");
+			goto err;
+		}
+		ret = pinctrl_select_state(pinctrl_info.pinctrl,
+					pinctrl_info.quat_cdc_lines_act);
+		if (ret < 0) {
+			pr_err("failed to enable codec gpios\n");
+			goto err1;
+		}
+	} else {
+			pr_err("%s: error codec type\n", __func__);
+	}
+	if (atomic_inc_return(&quat_mi2s_clk_ref) == 1) {
+		ret = snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_CBS_CFS);
+		if (ret < 0)
+			pr_debug("%s: set fmt cpu dai failed\n", __func__);
+	}
+	
+	//<asus-yusheng20150519+>
+	quat_mi2s_status = 1;
+	//<asus-yusheng20150519->
+	
+	return ret;
+err1:
+	ret = quat_mi2s_sclk_ctl(substream, false);
+	if (ret < 0)
+		pr_err("failed to disable sclk\n");
+err:
+	//<asus-yusheng20150626+> Qualcomm suggest remove MCLK enable setting from case:02066608
+	//Because ZE600KL use the GPIO 116 to be Camera power pin , the mclk enable could remove
+	//ret = msm8x16_enable_codec_ext_clk(codec, 0, true);
+	//if (ret < 0)
+		//pr_err("failed to disable mclk\n");
+	//<asus-yusheng20150626-> Qualcomm suggest remove MCLK enable setting from case:02066608
+		
+	//<asus-yusheng20150519+>
+	quat_mi2s_status = 0;
+	//<asus-yusheng20150519->
+
+	return ret;
+}
+
+static void msm_quat_mi2s_snd_shutdown(struct snd_pcm_substream *substream)
+{
+	int ret;
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_card *card = rtd->card;
+	
+	//<asus-yusheng20150626+> Qualcomm suggest remove MCLK enable setting from case:02066608
+	//struct snd_soc_codec *codec = rtd->codec;
+	//<asus-yusheng20150626-> Qualcomm suggest remove MCLK enable setting from case:02066608
+	
+	struct msm8916_asoc_mach_data *pdata = snd_soc_card_get_drvdata(card);
+	
+	pr_debug("%s(): substream = %s  stream = %d\n", __func__,
+				substream->name, substream->stream);
+	if ((!pdata->codec_type) &&
+			((pdata->ext_pa & QUAT_MI2S_ID) == QUAT_MI2S_ID)) {
+		ret = quat_mi2s_sclk_ctl(substream, false);
+		
+		//<asus-yusheng20150519+>
+		if (ret < 0){
+			pr_err("%s:clock disable failed\n", __func__);
+		}
+		else{
+		   quat_mi2s_status = 0;
+		}
+		//<asus-yusheng20150519->
+		
+		//<asus-yusheng20150626+> Qualcomm suggest remove MCLK enable setting from case:02066608
+	        //Because ZE600KL use the GPIO 116 to be Camera power pin , the mclk enable could remove
+		//if (atomic_read(&pdata->mclk_rsc_ref) > 0) {
+			//atomic_dec(&pdata->mclk_rsc_ref);
+			//pr_debug("%s: decrementing mclk_res_ref %d\n",
+				//		__func__,
+				//	atomic_read(&pdata->mclk_rsc_ref));
+		//}
+		//<asus-yusheng20150626-> Qualcomm suggest remove MCLK enable setting from case:02066608
+		
+	//<asus yusheng from patch case:01942332>
+        if (atomic_read(&quat_mi2s_clk_ref) > 0)
+               atomic_dec(&quat_mi2s_clk_ref);
+       
+	        //<asus-yusheng20150626+> Qualcomm suggest remove MCLK enable setting from case:02066608
+	   	//Because ZE600KL use the GPIO 116 to be Camera power pin , the mclk enable could remove
+		if ((atomic_read(&quat_mi2s_clk_ref) == 0)) {
+			ret = pinctrl_select_state(pinctrl_info.pinctrl,pinctrl_info.quat_cdc_lines_sus);
+			if (ret < 0)
+			pr_err("%s: error at pinctrl state select\n",__func__);
+		}
+
+		//if ((atomic_read(&quat_mi2s_clk_ref) == 0) &&
+		//	(atomic_read(&pdata->mclk_rsc_ref) == 0)) {
+		//		msm8x16_enable_codec_ext_clk(codec, 0, true);
+		//		ret = pinctrl_select_state(pinctrl_info.pinctrl,pinctrl_info.quat_cdc_lines_sus);
+		//		if (ret < 0)
+		//		pr_err("%s: error at pinctrl state select\n",__func__);
+		//}
+		//<asus-yusheng20150626-> Qualcomm suggest remove MCLK enable setting from case:02066608
+		
+		
+	//<asus yusheng from patch case:01942332>
+ 	}
+ }
+//<asus-yusheng20150420 add for dual-speaker path--->
+
 static int conf_int_codec_mux(struct msm8916_asoc_mach_data *pdata)
 {
 	int ret = 0;
@@ -965,7 +1265,14 @@ static int conf_int_codec_mux(struct msm8916_asoc_mach_data *pdata)
 	 */
 	vaddr = pdata->vaddr_gpio_mux_spkr_ctl;
 	val = ioread32(vaddr);
-	val = val | 0x00030300;
+	//<asus-yusheng20150506 solving concurrency issue between Tertiary and Quaternary for dual spk+>
+	if(asus_PRJ_ID==ASUS_ZE600KL){
+		val = val | 0x00010002;
+	}
+	else{
+		val = val | 0x00030300;
+	}
+	//<asus-yusheng20150506 solving concurrency issue between Tertiary and Quaternary for dual spk->
 	iowrite32(val, vaddr);
 
 	vaddr = pdata->vaddr_gpio_mux_mic_ctl;
@@ -1067,7 +1374,7 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	}
 
 #define S(X, Y) ((WCD_MBHC_CAL_PLUG_TYPE_PTR(msm8x16_wcd_cal)->X) = (Y))
-	S(v_hs_max, 1500);
+	S(v_hs_max, 1700);
 #undef S
 #define S(X, Y) ((WCD_MBHC_CAL_BTN_DET_PTR(msm8x16_wcd_cal)->X) = (Y))
 	S(num_btn, WCD_MBHC_DEF_BUTTONS);
@@ -1085,16 +1392,16 @@ static void *def_msm8x16_wcd_mbhc_cal(void)
 	 * all btn_low corresponds to threshold for current source
 	 * all bt_high corresponds to threshold for Micbias
 	 */
-	btn_low[0] = 25;
-	btn_high[0] = 25;
-	btn_low[1] = 50;
-	btn_high[1] = 50;
-	btn_low[2] = 75;
-	btn_high[2] = 75;
-	btn_low[3] = 112;
-	btn_high[3] = 112;
-	btn_low[4] = 137;
-	btn_high[4] = 137;
+	btn_low[0] = 75;
+	btn_high[0] = 87;
+	btn_low[1] = 100;
+	btn_high[1] = 125;
+	btn_low[2] = 250;
+	btn_high[2] = 300;
+	btn_low[3] = 462;
+	btn_high[3] = 612;
+	btn_low[4] = 784;
+	btn_high[4] = 784;
 
 	return msm8x16_wcd_cal;
 }
@@ -1170,6 +1477,14 @@ static int msm_audrx_init_wcd(struct snd_soc_pcm_runtime *rtd)
 		ret = -ENOMEM;
 	return ret;
 }
+
+//<asus-yusheng20150420 add for dual-speaker path+++>
+static struct snd_soc_ops msm8x16_quat_mi2s_be_ops = {
+	.startup = msm_quat_mi2s_snd_startup,
+	.hw_params = msm_mi2s_snd_hw_params,
+	.shutdown = msm_quat_mi2s_snd_shutdown,
+};
+//<asus-yusheng20150420 add for dual-speaker path--->
 
 static struct snd_soc_ops msm8x16_sec_mi2s_be_ops = {
 	.startup = msm_sec_mi2s_snd_startup,
@@ -1808,6 +2123,37 @@ static struct snd_soc_dai_link msm8x16_dai[] = {
 		.be_hw_params_fixup = msm_be_hw_params_fixup,
 		.ignore_suspend = 1,
 	},
+
+    //<asus-yusheng20150420 add for dual-speaker path+++>
+	{
+		.name = LPASS_BE_QUAT_MI2S_RX,
+		.stream_name = "Quaternary MI2S Playback",
+		.cpu_dai_name = "msm-dai-q6-mi2s.3",
+		.platform_name = "msm-pcm-routing",
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+		.no_pcm = 1,
+		.be_id = MSM_BACKEND_DAI_QUATERNARY_MI2S_RX,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm8x16_quat_mi2s_be_ops,
+		.ignore_pmdown_time = 1, /* dai link has playback support */
+		.ignore_suspend = 1,
+	},
+	{
+		.name = LPASS_BE_QUAT_MI2S_TX,
+		.stream_name = "Quaternary MI2S Capture",
+		.cpu_dai_name = "msm-dai-q6-mi2s.3",
+		.platform_name = "msm-pcm-routing",
+		.codec_dai_name = "snd-soc-dummy-dai",
+		.codec_name = "snd-soc-dummy",
+		.no_pcm = 1,
+		.be_id = MSM_BACKEND_DAI_QUATERNARY_MI2S_TX,
+		.be_hw_params_fixup = msm_be_hw_params_fixup,
+		.ops = &msm8x16_quat_mi2s_be_ops,
+		.ignore_suspend = 1,
+	},
+	//<asus-yusheng20150420 add for dual-speaker path--->
+
 };
 
 static struct snd_soc_dai_link msm8x16_9306_dai_links[
@@ -1910,7 +2256,14 @@ static int msm8x16_setup_hs_jack(struct platform_device *pdev,
 			struct msm8916_asoc_mach_data *pdata)
 {
 	struct pinctrl *pinctrl;
-
+	/*steve_chen ++*/
+	g_gpio_audio_debug = of_get_named_gpio(pdev->dev.of_node,"AUDIO_DEBUG",0);
+	if(g_gpio_audio_debug < 0){
+		pr_err("%s: property Audio Debug not found!\n",__func__);
+	}else{
+		pr_debug("%s: property Audio Debug = %d\n",__func__,g_gpio_audio_debug);
+	}
+	/*steve_chen --*/
 	pdata->us_euro_gpio = of_get_named_gpio(pdev->dev.of_node,
 					"qcom,cdc-us-euro-gpios", 0);
 	if (pdata->us_euro_gpio < 0) {
@@ -1949,6 +2302,39 @@ static int msm8x16_setup_hs_jack(struct platform_device *pdev,
 	}
 	return 0;
 }
+
+//<asus-yusheng20150420 add for dual-speaker path+++>
+int get_quat_cdc_gpio_lines(struct pinctrl *pinctrl, int ext_pa)
+{
+	pr_debug("%s\n", __func__);
+	
+	switch (ext_pa & QUAT_MI2S_ID) {
+	case QUAT_MI2S_ID:
+	
+	    pr_debug("%s:  Case QUAT_MI2S_ID\n", __func__);
+	
+		pinctrl_info.quat_cdc_lines_sus = pinctrl_lookup_state(pinctrl,
+			"cdc_lines_quat_ext_sus");
+		if (IS_ERR(pinctrl_info.quat_cdc_lines_sus)) {
+			pr_err("%s: Unable to get pinctrl disable state handle\n",
+								__func__);
+			return -EINVAL;
+		}
+		pinctrl_info.quat_cdc_lines_act = pinctrl_lookup_state(pinctrl,
+			"cdc_lines_quat_ext_act");
+		if (IS_ERR(pinctrl_info.quat_cdc_lines_act)) {
+			pr_err("%s: Unable to get pinctrl disable state handle\n",
+								__func__);
+			return -EINVAL;
+		}
+		break;
+	default:
+		pr_debug("%s: no external PA connected %d\n", __func__, ext_pa);
+		break;
+	}
+	return 0;
+}
+//<asus-yusheng20150420 add for dual-speaker path--->
 
 int get_cdc_gpio_lines(struct pinctrl *pinctrl, int ext_pa)
 {
@@ -2137,6 +2523,44 @@ err:
 	return ret;
 }
 
+//<asus-yusheng20150519+> check quat mi2s clock is sending or not
+static ssize_t quat_status_proc_read(struct file *filp,char __user *buff,size_t len,loff_t *off)
+{
+	char messages[256];
+	
+	if(*off)
+		return 0;
+
+	memset(messages,0,sizeof(messages));
+	if(len > 256)
+		len = 256;
+
+	sprintf(messages,"%d\n",quat_mi2s_status);	
+
+	if(copy_to_user(buff,messages,len))
+		return -EFAULT;
+
+	(*off)++;
+	return len;
+}
+
+static struct file_operations quat_status_proc_ops = {
+       .read = quat_status_proc_read,
+};
+
+static void create_quat_status_proc_file(void)
+{
+	printk("create quat status proc file\n");
+	quat_status_proc_file = proc_create(QUAT_STATUS_PROC_FILE,0666,NULL,&quat_status_proc_ops);
+}
+static void remove_quat_status_proc_file(void)
+{
+	extern struct proc_dir_entry proc_root;
+	printk("remove quat status proc file\n");
+	remove_proc_entry(QUAT_STATUS_PROC_FILE,&proc_root);
+}
+//<asus-yusheng20150519-> check quat mi2s clock is sending or not
+
 static int msm8x16_asoc_machine_probe(struct platform_device *pdev)
 {
 	struct snd_soc_card *card;
@@ -2264,7 +2688,19 @@ static int msm8x16_asoc_machine_probe(struct platform_device *pdev)
 			return -EINVAL;
 		}
 		pinctrl_info.pinctrl = pinctrl;
-		ret = get_cdc_gpio_lines(pinctrl, pdata->ext_pa);
+		
+        //<asus-yusheng20150420 add for dual-speaker path+++>
+		if(asus_PRJ_ID==ASUS_ZE600KL){
+			ret = get_quat_cdc_gpio_lines(pinctrl, pdata->ext_pa);
+			if (ret < 0) {
+				pr_err("%s: failed to get the quat external mis2 gpio's %d\n",
+					__func__, ret);
+			}
+		}
+		//<asus-yusheng20150420 add for dual-speaker path--->
+
+        ret = get_cdc_gpio_lines(pinctrl, pdata->ext_pa);
+               
 		if (ret < 0) {
 			pr_err("%s: failed to ger the codec gpio's %d\n",
 					__func__, ret);
@@ -2309,6 +2745,11 @@ static int msm8x16_asoc_machine_probe(struct platform_device *pdev)
 	mutex_init(&pdata->cdc_mclk_mutex);
 	atomic_set(&pdata->mclk_rsc_ref, 0);
 	atomic_set(&pdata->mclk_enabled, false);
+    //<asus-yusheng20150420 add for dual-speaker path+++>
+	if(asus_PRJ_ID==ASUS_ZE600KL){
+		atomic_set(&quat_mi2s_clk_ref, 0);
+    }
+	//<asus-yusheng20150420 add for dual-speaker path--->
 
 	ret = snd_soc_of_parse_audio_routing(card,
 			"qcom,audio-routing");
@@ -2327,6 +2768,13 @@ static int msm8x16_asoc_machine_probe(struct platform_device *pdev)
 			ret);
 		goto err;
 	}
+	
+	//<asus-yusheng20150519+> check quat mi2s clock is sending or not
+	if(asus_PRJ_ID == ASUS_ZE600KL){
+		create_quat_status_proc_file();
+	}
+	//<asus-yusheng20150519-> check quat mi2s clock is sending or not
+	
 	return 0;
 err:
 	devm_kfree(&pdev->dev, pdata);
@@ -2334,6 +2782,14 @@ err:
 		iounmap(pdata->vaddr_gpio_mux_spkr_ctl);
 	if (pdata->vaddr_gpio_mux_mic_ctl)
 		iounmap(pdata->vaddr_gpio_mux_mic_ctl);
+	
+	//<asus-yusheng20150519+> check quat mi2s clock is sending or not
+	if(asus_PRJ_ID == ASUS_ZE600KL){
+		if(quat_status_proc_file)
+			remove_quat_status_proc_file();
+	}
+	//<asus-yusheng20150519-> check quat mi2s clock is sending or not
+	
 	return ret;
 }
 
@@ -2348,6 +2804,14 @@ static int msm8x16_asoc_machine_remove(struct platform_device *pdev)
 		iounmap(pdata->vaddr_gpio_mux_mic_ctl);
 	snd_soc_unregister_card(card);
 	mutex_destroy(&pdata->cdc_mclk_mutex);
+	
+	//<asus-yusheng20150519+> check quat mi2s clock is sending or not
+	if(asus_PRJ_ID == ASUS_ZE600KL){
+		if(quat_status_proc_file)
+			remove_quat_status_proc_file();
+	}
+	//<asus-yusheng20150519-> check quat mi2s clock is sending or not
+	
 	return 0;
 }
 

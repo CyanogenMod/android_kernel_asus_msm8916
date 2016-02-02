@@ -322,6 +322,12 @@ module_param_named(debug_enable, cpr_debug_enable, int, S_IRUGO | S_IWUSR);
 #define cpr_err(cpr_vreg, message, ...) \
 	pr_err("%s: " message, (cpr_vreg)->rdesc.name, ##__VA_ARGS__)
 
+//<asus-wx20150730>+>>
+static int cpr_last_volt[50];
+static int cpr_corner;
+//<asus-wx20150730>+<<
+
+
 static u64 cpr_read_remapped_efuse_row(struct cpr_regulator *cpr_vreg,
 					u32 row_num)
 {
@@ -792,6 +798,7 @@ static void cpr_scale(struct cpr_regulator *cpr_vreg,
 			return;
 		}
 		cpr_vreg->last_volt[corner] = new_volt;
+		cpr_last_volt[corner] = cpr_vreg->last_volt[corner]; //<asus-wx20150730+>
 
 		/* Disable auto nack down */
 		reg_mask = RBCPR_CTL_SW_AUTO_CONT_NACK_DN_EN;
@@ -868,6 +875,7 @@ static void cpr_scale(struct cpr_regulator *cpr_vreg,
 			return;
 		}
 		cpr_vreg->last_volt[corner] = new_volt;
+		cpr_last_volt[corner] = cpr_vreg->last_volt[corner]; //<asus-wx20150730+>
 
 		/* Restore default threshold for UP */
 		reg_mask = RBCPR_CTL_UP_THRESHOLD_MASK <<
@@ -1045,6 +1053,7 @@ static int cpr_regulator_set_voltage(struct regulator_dev *rdev,
 	}
 
 	cpr_vreg->corner = corner;
+	cpr_corner = corner; //<asus-wx20150730+>
 
 _exit:
 	mutex_unlock(&cpr_vreg->cpr_mutex);
@@ -3074,7 +3083,10 @@ static int cpr_init_cpr_voltages(struct cpr_regulator *cpr_vreg,
 		return -EINVAL;
 
 	for (i = CPR_CORNER_MIN; i <= cpr_vreg->num_corners; i++)
+	{
 		cpr_vreg->last_volt[i] = cpr_vreg->open_loop_volt[i];
+		cpr_last_volt[i] = cpr_vreg->last_volt[i]; //<asus-wx20150730+>
+	}
 
 	return 0;
 }
@@ -3979,6 +3991,19 @@ static void cpr_debugfs_base_remove(void)
 {}
 
 #endif
+
+//<asus-wx20150730>+>>
+void cpr_regulator_print_corner_voltage(void)
+{
+	int corner;
+	pr_err("wxtest : cpr_regulator corner = %d\n", cpr_corner);
+	for (corner = 1;corner < 50;corner++) {
+		if (cpr_last_volt[corner] == 0) break;
+		pr_err("last_volt[%d] = %d\n", corner, cpr_last_volt[corner]);
+	}
+}
+EXPORT_SYMBOL(cpr_regulator_print_corner_voltage);
+//<asus-wx20150730>+<<
 
 static int cpr_regulator_probe(struct platform_device *pdev)
 {

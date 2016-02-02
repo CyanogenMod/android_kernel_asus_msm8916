@@ -21,8 +21,15 @@
 #include <linux/leds.h>
 #include <linux/qpnp/pwm.h>
 #include <linux/err.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
 
 #include "mdss_dsi.h"
+#include <linux/msm_mdp.h>
+#include <asm/uaccess.h>
+
+#include <linux/kernel.h> //<asus-bruce20150422+>
+
 
 #define DT_CMD_HDR 6
 
@@ -35,6 +42,182 @@
 #define MIN_REFRESH_RATE 30
 
 DEFINE_LED_TRIGGER(bl_led_trigger);
+extern void ftxxxx_ts_suspend(void);
+extern void ftxxxx_ts_resume(void);
+
+#define PANEL_CABC_MASK	0x3
+//extern void rt4532_set(void);
+
+extern struct mdss_panel_data *g_mdss_pdata;
+int set_tcon_cabc(int mode);
+void read_tcon_cabc(char *rbuf);
+static struct mutex cmd_mutex;
+static char ctrl_display[2] = {0x53, 0x24};
+
+#ifndef ASUS_FACTORY_BUILD
+static char cabc_mode[2] = {0x55, Still_MODE};
+#else
+static char cabc_mode[2] = {0x55, OFF_MODE};
+#endif
+
+static char read_cabc_mode[1] = {0x56};
+static int balance_mode =1;
+static struct dsi_cmd_desc tcon_cabc_cmd[] = {
+    { {DTYPE_DCS_WRITE1, 1, 0, 0, 0, sizeof(ctrl_display)}, ctrl_display},
+    { {DTYPE_DCS_WRITE1, 1, 0, 0, 0, sizeof(cabc_mode)}, cabc_mode},
+};
+
+static struct dsi_cmd_desc read_cabc_cmd[] = {
+		{{DTYPE_GEN_READ1,1,0,0,0,1},read_cabc_mode},
+};
+
+static char led_pwm1[2] = {0x51, 0x64};	/* DTYPE_DCS_WRITE1 */
+static struct dsi_cmd_desc backlight_cmd = {
+	{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_pwm1)},
+	led_pwm1
+};
+
+extern char lcd_unique_id[64];
+extern char asus_lcd_id[2];
+static struct proc_dir_entry *lcd_uniqueID_proc_file;
+struct delayed_work cabc_delay_work;
+struct workqueue_struct *cabc_enable_workqueue;
+static int resume2s=1;
+static void cabc_resume_delay_work(struct work_struct *work)
+{
+	printk("[DISP]Workqueue first time cabc state store, LED_PWM1 : %d\n",led_pwm1[1]);
+	if (led_pwm1[1] < 21  && balance_mode ==1 ){
+		cabc_mode[1]=OFF_MODE;
+		set_tcon_cabc(cabc_mode[1]);
+	}else if(led_pwm1[1] >= 21 && balance_mode ==1 ){
+		cabc_mode[1]=Still_MODE;
+		set_tcon_cabc(cabc_mode[1]);
+	}
+   resume2s=1;
+}
+
+static int lcd_uniqueID_proc_read(struct seq_file *buf, void *v)
+{
+	seq_printf(buf, "%s\n", lcd_unique_id);
+	return 0;
+}
+
+static int lcd_uniqueID_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, lcd_uniqueID_proc_read, NULL);
+}
+
+
+static struct file_operations lcd_uniqueID_proc_ops = {
+	.open = lcd_uniqueID_proc_open,
+	.read = seq_read,
+	.release = single_release,
+};
+
+static void create_lcd_uniqueID_proc_file(void)
+{
+    printk("create_lcd_uniqueID_proc_file\n");
+    lcd_uniqueID_proc_file = proc_create("lcd_unique_id", 0444,NULL, &lcd_uniqueID_proc_ops);
+    if(lcd_uniqueID_proc_file){
+        printk("create lcd_uniqueID_proc_file sucessed!\n");
+    }else{
+		printk("create lcd_uniqueID_proc_file failed!\n");
+    }
+}
+
+static struct proc_dir_entry *lcd_id_proc_file;
+static int lcd_id_proc_read(struct seq_file *buf, void *v)
+{
+	seq_printf(buf, "%s\n", asus_lcd_id);
+	return 0;
+}
+
+static int lcd_id_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, lcd_id_proc_read, NULL);
+}
+
+
+static struct file_operations lcd_id_proc_ops = {
+	.open = lcd_id_proc_open,
+	.read = seq_read,
+	.release = single_release,
+};
+
+static void create_lcd_id_proc_file(void)
+{
+    printk("create_lcd_id_proc_file\n");
+    lcd_id_proc_file = proc_create("lcd_id", 0444,NULL, &lcd_id_proc_ops);
+    if(lcd_id_proc_file){
+        printk("create lcd_id_proc_file sucessed!\n");
+    }else{
+		printk("create lcd_id_proc_file failed!\n");
+    }
+}
+
+static struct proc_dir_entry *cabc_mode_switch;
+
+static ssize_t cabc_mode_switch_proc_write(struct file *file, const const char __user *buff, size_t count,loff_t *ops)
+{
+	char temp;
+	//char oldval = cabc_mode[1];
+
+	if(count > 0)
+	{
+		if(get_user(temp,buff))			
+			return -EFAULT;
+
+		if(temp > '3' || temp < '0'){
+			printk("[DISPLAY] : The error number\n");
+			return -1;
+		}else if(led_pwm1[1]>21){
+			cabc_mode[1] = temp - 0x30;
+		}
+	}
+	printk("[DISPLAY] : The Current CABC Mode is %x\n",cabc_mode[1]);
+	set_tcon_cabc(cabc_mode[1]);
+	if( temp-0x30 == Still_MODE)
+		balance_mode=1;
+	else
+		balance_mode=0;
+	/*if(set_tcon_cabc(cabc_mode[1]))
+		cabc_mode[1] = oldval;*/
+
+	return count;
+}
+
+static int cabc_mode_switch_proc_read(struct seq_file *buf, void *v)
+{
+		char temp[2] = {0};
+		read_tcon_cabc(&temp[0]);
+		temp[0] = temp[0] & 0x03;
+		temp[0] = temp[0] + 0x30;
+		seq_printf(buf, "%s\n", temp);
+		
+		return 0;
+}
+
+static int cabc_mode_switch_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file,cabc_mode_switch_proc_read,NULL);
+}
+
+static struct file_operations cabc_mode_switch_proc_ops = {
+	.open = cabc_mode_switch_proc_open,
+	.read = seq_read,
+	.write = cabc_mode_switch_proc_write,
+	.release = single_release,
+};
+static void create_cabc_mode_switch_file(void)
+{
+	printk("[DISPLAY] : create_cabc_mode_switch_file\n");
+	cabc_mode_switch = proc_create("cabc_mode_switch",0666,NULL,&cabc_mode_switch_proc_ops);
+	if(cabc_mode_switch){
+        printk("[DISPLAY] : create_cabc_mode_switch_file sucessed!\n");
+    }else{
+		printk("[DISPLAY] : create create_cabc_mode_switch_file failed!\n");
+    }
+}
 
 void mdss_dsi_panel_pwm_cfg(struct mdss_dsi_ctrl_pdata *ctrl)
 {
@@ -173,12 +356,25 @@ static void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 }
 
-static char led_pwm1[2] = {0x51, 0x0};	/* DTYPE_DCS_WRITE1 */
-static struct dsi_cmd_desc backlight_cmd = {
-	{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_pwm1)},
-	led_pwm1
+//<asus-bruce20150422+>
+static char led_pwm_cpt[3] = {0x51, 0x06, 0x4F};	//set default brightness to pwm 100/256 percent
+static struct dsi_cmd_desc cpt_backlight_cmd = {
+	{DTYPE_GEN_LWRITE, 1, 0, 0, 1, sizeof(led_pwm_cpt)},
+	led_pwm_cpt
 };
 
+static void dsi_cpt_panel_bklt_cmd_config(struct dcs_cmd_req* cmdreq, int level){
+
+	level = (level+1)*16-1;	//scale 0~255 brightness to 12bits
+	led_pwm_cpt[1] = level/256;	//set paramter1; MSB 4 bits
+	led_pwm_cpt[2] = level & 0xff; //set parameter2; LSB 8 bits
+	PANEL_DBG("%s: led_pwm_cpt 0x%02x, 0x%02x\n",__FUNCTION__,led_pwm_cpt[1], led_pwm_cpt[2]);
+	cmdreq->cmds = &cpt_backlight_cmd;
+	cmdreq->flags = CMD_REQ_COMMIT | CMD_CLK_CTRL | CMD_REQ_UNICAST;
+}
+//<asus-bruce20150422->
+
+static int bkl_off = 0;
 static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 {
 	struct dcs_cmd_req cmdreq;
@@ -190,9 +386,41 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 			return;
 	}
 
-	pr_debug("%s: level=%d\n", __func__, level);
-
+    PANEL_DBG("%s: set level %d\n",__FUNCTION__,level);
 	led_pwm1[1] = (unsigned char)level;
+
+	if(level == 0){
+		if ( (asus_lcd_id[0]!='2') && (asus_lcd_id[0]!='3') ){
+			PANEL_DBG("disable backlight enable gpio\n");
+			ASUSEvtlog("[Display]disable backlight\n");
+			gpio_set_value((ctrl->bklt_en_gpio), 0);
+			if(asus_lcd_id[0]=='4'){
+				//pr_err("[Jeffery] delay 90ms\n");
+				mdelay(140);
+			}
+		}
+		bkl_off = 1;
+	}else{
+		/*Don't Change CABC state within 2s after resuming*/
+		if((asus_lcd_id[0]!='4') && (asus_lcd_id[0]!='6') && (asus_lcd_id[0]!='7')){
+			if (level < 21 && cabc_mode[1]==Still_MODE && balance_mode == 1 && resume2s == 1){	 //Close CABC when level is below 20 in balance mode
+				cabc_mode[1]=OFF_MODE;
+				set_tcon_cabc(cabc_mode[1]);
+			}else if(level >= 21 && cabc_mode[1]==OFF_MODE && balance_mode == 1 && resume2s == 1){ //Open CABC when level is over 20
+				cabc_mode[1]=Still_MODE;
+				set_tcon_cabc(cabc_mode[1]);
+			}
+		}
+		if(bkl_off){
+			if( (asus_lcd_id[0] == '2') || (asus_lcd_id[0] == '3') )
+			mdelay(20);
+
+			PANEL_DBG("enable backlight enable gpio\n");
+			ASUSEvtlog("[Display]enable backlight\n");
+			gpio_set_value((ctrl->bklt_en_gpio), 1);
+			bkl_off = 0;
+		}
+	}
 
 	memset(&cmdreq, 0, sizeof(cmdreq));
 	cmdreq.cmds = &backlight_cmd;
@@ -200,8 +428,13 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 	cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL;
 	cmdreq.rlen = 0;
 	cmdreq.cb = NULL;
-
+	//<asus-bruce20150422+>
+	if( (asus_PRJ_ID==ASUS_ZE600KL) && (asus_lcd_id[0]=='4') ){	//for ZE600KL cpt panel
+		dsi_cpt_panel_bklt_cmd_config(&cmdreq, level);
+	}
+	//<asus-bruce20150422->
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
+
 }
 
 static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
@@ -223,15 +456,7 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 			rc);
 		goto rst_gpio_err;
 	}
-	if (gpio_is_valid(ctrl_pdata->bklt_en_gpio)) {
-		rc = gpio_request(ctrl_pdata->bklt_en_gpio,
-						"bklt_enable");
-		if (rc) {
-			pr_err("request bklt gpio failed, rc=%d\n",
-				       rc);
-			goto bklt_en_gpio_err;
-		}
-	}
+	
 	if (gpio_is_valid(ctrl_pdata->mode_gpio)) {
 		rc = gpio_request(ctrl_pdata->mode_gpio, "panel_mode");
 		if (rc) {
@@ -243,9 +468,6 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	return rc;
 
 mode_gpio_err:
-	if (gpio_is_valid(ctrl_pdata->bklt_en_gpio))
-		gpio_free(ctrl_pdata->bklt_en_gpio);
-bklt_en_gpio_err:
 	gpio_free(ctrl_pdata->rst_gpio);
 rst_gpio_err:
 	if (gpio_is_valid(ctrl_pdata->disp_en_gpio))
@@ -264,7 +486,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
-
+    PANEL_FUNC;
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
@@ -299,8 +521,6 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 					usleep(pinfo->rst_seq[i] * 1000);
 			}
 
-			if (gpio_is_valid(ctrl_pdata->bklt_en_gpio))
-				gpio_set_value((ctrl_pdata->bklt_en_gpio), 1);
 		}
 
 		if (gpio_is_valid(ctrl_pdata->mode_gpio)) {
@@ -316,15 +536,13 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 			pr_debug("%s: Reset panel done\n", __func__);
 		}
 	} else {
-		if (gpio_is_valid(ctrl_pdata->bklt_en_gpio)) {
-			gpio_set_value((ctrl_pdata->bklt_en_gpio), 0);
-			gpio_free(ctrl_pdata->bklt_en_gpio);
-		}
 		if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
 			gpio_set_value((ctrl_pdata->disp_en_gpio), 0);
 			gpio_free(ctrl_pdata->disp_en_gpio);
 		}
-		gpio_set_value((ctrl_pdata->rst_gpio), 0);
+		if (((asus_lcd_id[0]!='2') && (asus_lcd_id[0]!='3')) || fb_shutdown){ //<Asus BSP Squall - keep LCD_RST_EN high>
+			gpio_set_value((ctrl_pdata->rst_gpio), 0);   
+		}
 		gpio_free(ctrl_pdata->rst_gpio);
 		if (gpio_is_valid(ctrl_pdata->mode_gpio))
 			gpio_free(ctrl_pdata->mode_gpio);
@@ -538,7 +756,6 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	struct mdss_dsi_ctrl_pdata *sctrl = NULL;
-
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return;
@@ -603,6 +820,8 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
+	PANEL_FUNC;
+	ASUSEvtlog("[Display]mdss_dsi_panel_on\n");
 
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
@@ -618,6 +837,16 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 	if (ctrl->on_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
 
+	if ( (asus_lcd_id[0]=='2') && (asus_lcd_id[0]=='3') ){
+		queue_delayed_work(cabc_enable_workqueue, &cabc_delay_work, msecs_to_jiffies(2000));
+	}else{
+		set_tcon_cabc(cabc_mode[1]);	//ASUS_BSP: wigman+++, restore cabc level
+		gpio_set_value((ctrl->bklt_en_gpio), 1);
+	}
+
+   // rt4532_set();
+   ftxxxx_ts_resume();//resume touch
+
 end:
 	pinfo->blank_state = MDSS_PANEL_BLANK_UNBLANK;
 	pr_debug("%s:-\n", __func__);
@@ -628,17 +857,23 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
 	struct mdss_panel_info *pinfo;
-
+	ftxxxx_ts_suspend();//suspend touch
+	
 	if (pdata == NULL) {
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
+	PANEL_FUNC;
+	ASUSEvtlog("[Display]mdss_dsi_panel_off\n");
 
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
 	pr_debug("%s: ctrl=%p ndx=%d\n", __func__, ctrl, ctrl->ndx);
+
+	if ( (asus_lcd_id[0]=='2') && (asus_lcd_id[0]=='3') )
+		cancel_delayed_work_sync(&cabc_delay_work);
 
 	if (pinfo->dcs_cmd_by_left) {
 		if (ctrl->ndx != DSI_CTRL_LEFT)
@@ -648,6 +883,9 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	if (ctrl->off_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->off_cmds);
 
+	if ( (asus_lcd_id[0]=='2') && (asus_lcd_id[0]=='3') )
+	    resume2s=0;
+	
 end:
 	pinfo->blank_state = MDSS_PANEL_BLANK_BLANK;
 	pr_debug("%s:-\n", __func__);
@@ -681,6 +919,67 @@ static int mdss_dsi_panel_low_power_config(struct mdss_panel_data *pdata,
 	pr_debug("%s:-\n", __func__);
 	return 0;
 }
+
+void read_tcon_cabc(char *rbuf)
+{
+	struct dcs_cmd_req cmdreq;
+    struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+	
+
+	ctrl_pdata = container_of(g_mdss_pdata, struct mdss_dsi_ctrl_pdata,
+                panel_data);
+
+    mutex_lock(&cmd_mutex);
+	
+    memset(&cmdreq, 0, sizeof(cmdreq));
+    cmdreq.cmds = read_cabc_cmd;
+	cmdreq.cmds_cnt = 1;
+    cmdreq.flags = CMD_REQ_RX | CMD_REQ_COMMIT;
+    cmdreq.rlen = 1;
+	cmdreq.rbuf = rbuf;
+    cmdreq.cb = NULL;
+    mdss_dsi_cmdlist_put(ctrl_pdata, &cmdreq);
+	
+    mutex_unlock(&cmd_mutex);
+}
+EXPORT_SYMBOL(read_tcon_cabc);
+
+int set_tcon_cabc(int mode)
+{
+    struct dcs_cmd_req cmdreq;
+    struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
+	int ret = 0;
+
+    ctrl_pdata = container_of(g_mdss_pdata, struct mdss_dsi_ctrl_pdata,
+                panel_data);
+
+    mutex_lock(&cmd_mutex);
+
+	cabc_mode[1] &= ~PANEL_CABC_MASK;
+	cabc_mode[1] |= (mode & PANEL_CABC_MASK);
+    if (g_mdss_pdata->panel_info.panel_power_state == MDSS_PANEL_POWER_ON) {
+        PANEL_DBG("write cabc mode = 0x%x\n", cabc_mode[1]);
+		ASUSEvtlog("[Display]write cabc mode = 0x%x\n", cabc_mode[1]);
+
+        memset(&cmdreq, 0, sizeof(cmdreq));
+        cmdreq.cmds = tcon_cabc_cmd;
+        cmdreq.cmds_cnt = ARRAY_SIZE(tcon_cabc_cmd);
+        cmdreq.flags = CMD_REQ_COMMIT | CMD_CLK_CTRL;
+        cmdreq.rlen = 0;
+        cmdreq.cb = NULL;
+        mdss_dsi_cmdlist_put(ctrl_pdata, &cmdreq);
+		ret = 0;
+    } else {
+        PANEL_DBG("CABC Set Fail: mode=%d\n", mode);
+		ASUSEvtlog("[Display]CABC Set Fail: mode=%d\n", mode);
+		ret = 1;
+    }
+	
+    mutex_unlock(&cmd_mutex);
+
+	return ret;
+}
+EXPORT_SYMBOL(set_tcon_cabc);
 
 static void mdss_dsi_parse_lane_swap(struct device_node *np, char *dlane_swap)
 {
@@ -1124,9 +1423,12 @@ static int mdss_dsi_parse_panel_features(struct device_node *np,
 		"qcom,ulps-enabled");
 	pr_info("%s: ulps feature %s\n", __func__,
 		(pinfo->ulps_feature_enabled ? "enabled" : "disabled"));
+#ifndef ASUS_FACTORY_BUILD
 	pinfo->esd_check_enabled = of_property_read_bool(np,
 		"qcom,esd-check-enabled");
-
+#else
+	pinfo->esd_check_enabled = false;
+#endif
 	pinfo->ulps_suspend_enabled = of_property_read_bool(np,
 		"qcom,suspend-ulps-enabled");
 	pr_info("%s: ulps during suspend feature %s", __func__,
@@ -1459,7 +1761,7 @@ static int mdss_panel_parse_dt(struct device_node *np,
 			}
 		} else if (!strncmp(data, "bl_ctrl_dcs", 11)) {
 			ctrl_pdata->bklt_ctrl = BL_DCS_CMD;
-			pr_debug("%s: Configured DCS_CMD bklt ctrl\n",
+			printk(KERN_NOTICE "<Display>%s: Configured DCS_CMD bklt ctrl\n",
 								__func__);
 		}
 	}
@@ -1668,6 +1970,11 @@ int mdss_dsi_panel_init(struct device_node *node,
 		pr_err("%s: Invalid arguments\n", __func__);
 		return -ENODEV;
 	}
+   //ASUS_BSP:wigman,add proc node to send lcd_uniqueID
+	create_lcd_uniqueID_proc_file();
+    create_lcd_id_proc_file();
+	create_cabc_mode_switch_file();
+	mutex_init(&cmd_mutex);
 
 	pinfo = &ctrl_pdata->panel_data.panel_info;
 
@@ -1701,6 +2008,13 @@ int mdss_dsi_panel_init(struct device_node *node,
 	ctrl_pdata->low_power_config = mdss_dsi_panel_low_power_config;
 	ctrl_pdata->panel_data.set_backlight = mdss_dsi_panel_bl_ctrl;
 	ctrl_pdata->switch_mode = mdss_dsi_panel_switch_mode;
+
+	printk("[DISP] CABC enable workqueue\n");
+	INIT_DELAYED_WORK(&cabc_delay_work,cabc_resume_delay_work);
+	cabc_enable_workqueue = create_workqueue("cabc_resume_delay_work");
+
+	if (unlikely(!cabc_enable_workqueue))
+	 	printk("[DISP]%s : unable to create Panel reset workqueue\n", __func__);
 
 	return 0;
 }

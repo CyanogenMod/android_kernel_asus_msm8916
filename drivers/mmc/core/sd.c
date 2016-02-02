@@ -403,6 +403,8 @@ static int sd_select_driver_type(struct mmc_card *card, u8 *status)
 	 * or there is no board specific handler then default Driver
 	 * Type B is used.
 	 */
+	if( ASUS_ZE550KL != asus_PRJ_ID ){
+
 	if (!(card->host->caps & (MMC_CAP_DRIVER_TYPE_A | MMC_CAP_DRIVER_TYPE_C
 	    | MMC_CAP_DRIVER_TYPE_D)))
 		return 0;
@@ -439,11 +441,21 @@ static int sd_select_driver_type(struct mmc_card *card, u8 *status)
 		card->sw_caps.uhs_max_dtr,
 		host_drv_type, card_drv_type);
 	mmc_host_clk_release(card->host);
-
+	}else{
+		host_drv_type |= SD_DRIVER_TYPE_A;
+                host_drv_type |= SD_DRIVER_TYPE_C;
+                host_drv_type |= SD_DRIVER_TYPE_D;
+                card_drv_type |= SD_DRIVER_TYPE_A;
+                card_drv_type |= SD_DRIVER_TYPE_C;
+                card_drv_type |= SD_DRIVER_TYPE_D;
+		mmc_host_clk_hold(card->host);
+        	drive_strength = 3;
+		mmc_host_clk_release(card->host);	
+	}
 	err = mmc_sd_switch(card, 1, 2, drive_strength, status);
 	if (err)
 		return err;
-
+	pr_err("%s: status %x\n",mmc_hostname(card->host),status[15]);
 	if ((status[15] & 0xF) != drive_strength) {
 		pr_warning("%s: Problem setting drive strength!\n",
 			mmc_hostname(card->host));

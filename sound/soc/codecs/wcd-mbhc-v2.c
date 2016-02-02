@@ -9,6 +9,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
+#define DEBUG 1
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -42,11 +43,11 @@
 			   SND_JACK_OC_HPHR | SND_JACK_LINEOUT | \
 			   SND_JACK_UNSUPPORTED)
 #define WCD_MBHC_JACK_BUTTON_MASK (SND_JACK_BTN_0 | SND_JACK_BTN_1 | \
-				  SND_JACK_BTN_2 | SND_JACK_BTN_3 | \
-				  SND_JACK_BTN_4)
+				  SND_JACK_BTN_2 | SND_JACK_BTN_3)/* | \
+				  SND_JACK_BTN_4)*/
 #define OCP_ATTEMPT 1
-#define HS_DETECT_PLUG_TIME_MS (3 * 1000)
-#define SPECIAL_HS_DETECT_TIME_MS (2 * 1000)
+#define HS_DETECT_PLUG_TIME_MS (1 * 1000)
+#define SPECIAL_HS_DETECT_TIME_MS (7 * 100)
 #define MBHC_BUTTON_PRESS_THRESHOLD_MIN 250
 #define GND_MIC_SWAP_THRESHOLD 4
 #define WCD_FAKE_REMOVAL_MIN_PERIOD_MS 100
@@ -54,6 +55,8 @@
 #define FW_READ_ATTEMPTS 15
 #define FW_READ_TIMEOUT 4000000
 
+int plug_count = 0;
+extern int g_DebugMode;
 static int det_extn_cable_en;
 module_param(det_extn_cable_en, int,
 		S_IRUGO | S_IWUSR | S_IWGRP);
@@ -61,14 +64,14 @@ MODULE_PARM_DESC(det_extn_cable_en, "enable/disable extn cable detect");
 
 #define WCD_MBHC_RSC_LOCK(mbhc)			\
 {							\
-	pr_debug("%s: Acquiring BCL\n", __func__);	\
+	/*pr_debug("%s: Acquiring BCL\n", __func__);*/	\
 	mutex_lock(&mbhc->codec_resource_lock);		\
-	pr_debug("%s: Acquiring BCL done\n", __func__);	\
+	/*pr_debug("%s: Acquiring BCL done\n", __func__);*/	\
 }
 
 #define WCD_MBHC_RSC_UNLOCK(mbhc)			\
 {							\
-	pr_debug("%s: Release BCL\n", __func__);	\
+	/*pr_debug("%s: Release BCL\n", __func__);*/	\
 	mutex_unlock(&mbhc->codec_resource_lock);	\
 }
 
@@ -993,7 +996,7 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 				 MSM8X16_WCD_A_ANALOG_MBHC_BTN_RESULT);
 		result2 = snd_soc_read(codec,
 				MSM8X16_WCD_A_ANALOG_MBHC_ZDET_ELECT_RESULT);
-		pr_debug("%s: result2 = %x\n", __func__, result2);
+		printk("%s:result1 = %x, result2 = %x\n", __func__,result1, result2);
 
 		is_pa_on = snd_soc_read(codec,
 					MSM8X16_WCD_A_ANALOG_RX_HPH_CNP_EN) &
@@ -1171,7 +1174,8 @@ static void wcd_mbhc_detect_plug_type(struct wcd_mbhc *mbhc)
 	result1 = snd_soc_read(codec, MSM8X16_WCD_A_ANALOG_MBHC_BTN_RESULT);
 	result2 = snd_soc_read(codec,
 			MSM8X16_WCD_A_ANALOG_MBHC_ZDET_ELECT_RESULT);
-
+	printk("%s: result1 %x, result2 %x,timeout_result(%d)\n", __func__,
+							result1, result2,timeout_result);
 	if (!timeout_result) {
 		pr_debug("%s No btn press interrupt\n", __func__);
 		/*
@@ -1204,6 +1208,7 @@ static void wcd_mbhc_detect_plug_type(struct wcd_mbhc *mbhc)
 			  MSM8X16_WCD_A_ANALOG_MBHC_BTN_RESULT);
 		result2 = snd_soc_read(codec,
 			  MSM8X16_WCD_A_ANALOG_MBHC_ZDET_ELECT_RESULT);
+		printk("%s: result1 %x, result2 %x\n", __func__,result1, result2);
 
 		if (!result1 && !(result2 & 0x01))
 			plug_type = MBHC_PLUG_TYPE_HEADSET;
@@ -1240,6 +1245,12 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 	struct snd_soc_codec *codec = mbhc->codec;
 
 	pr_debug("%s: enter\n", __func__);
+
+	plug_count += 1;
+
+	if(g_DebugMode){
+		goto exit;
+	}
 
 	WCD_MBHC_RSC_LOCK(mbhc);
 
@@ -1362,6 +1373,8 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 	mbhc->in_swch_irq_handler = false;
 	WCD_MBHC_RSC_UNLOCK(mbhc);
 	pr_debug("%s: leave\n", __func__);
+exit: 
+	pr_debug("%s: Audio Debug mode,leave\n",__func__);
 }
 
 static irqreturn_t wcd_mbhc_mech_plug_detect_irq(int irq, void *data)
@@ -1382,6 +1395,56 @@ static irqreturn_t wcd_mbhc_mech_plug_detect_irq(int irq, void *data)
 	return r;
 }
 
+/*steve_chen ++*/
+void wcd_plug_detection_for_audio_debug(struct wcd_mbhc * mbhc,int debug_mode)
+{
+	if(debug_mode){
+		if(mbhc->current_plug != MBHC_PLUG_TYPE_NONE){
+			printk("%s: HS is pluged in,then audio -> debug model\n",__func__);
+			plug_count = 0;
+			wcd9xxx_spmi_lock_sleep();
+			wcd_mbhc_swch_irq_handler(mbhc);
+			wcd9xxx_spmi_unlock_sleep();
+		}
+		wcd9xxx_spmi_disable_irq(mbhc->intr_ids->mbhc_btn_press_intr);
+		wcd9xxx_spmi_disable_irq(mbhc->intr_ids->mbhc_btn_release_intr);
+		wcd9xxx_spmi_disable_irq(mbhc->intr_ids->hph_left_ocp);
+		wcd9xxx_spmi_disable_irq(mbhc->intr_ids->hph_right_ocp);
+	}else{
+		wcd9xxx_spmi_enable_irq(mbhc->intr_ids->mbhc_btn_press_intr);
+		wcd9xxx_spmi_enable_irq(mbhc->intr_ids->mbhc_btn_release_intr);
+		wcd9xxx_spmi_enable_irq(mbhc->intr_ids->hph_left_ocp);
+		wcd9xxx_spmi_enable_irq(mbhc->intr_ids->hph_right_ocp);
+		if(plug_count%2){
+			plug_count = 0;
+			mbhc->current_plug = MBHC_PLUG_TYPE_NONE;
+			snd_soc_update_bits(mbhc->codec, MSM8X16_WCD_A_ANALOG_MBHC_DET_CTL_1,
+					0x20, (1 << 5));
+			wcd9xxx_spmi_lock_sleep();
+			wcd_mbhc_swch_irq_handler(mbhc);
+			wcd9xxx_spmi_unlock_sleep();
+		}
+	}
+}
+EXPORT_SYMBOL(wcd_plug_detection_for_audio_debug);
+
+#ifdef ASUS_FACTORY_BUILD
+void wcd_disable_button_event_for_factory(struct wcd_mbhc * mbhc,int button_mode)
+{
+    if(mbhc->current_plug == MBHC_PLUG_TYPE_HEADSET){
+        if(1 == button_mode){
+            wcd9xxx_spmi_disable_irq(mbhc->intr_ids->mbhc_btn_press_intr);
+            wcd9xxx_spmi_disable_irq(mbhc->intr_ids->mbhc_btn_release_intr);
+        }else if(0 == button_mode){
+            wcd9xxx_spmi_enable_irq(mbhc->intr_ids->mbhc_btn_press_intr);
+            wcd9xxx_spmi_enable_irq(mbhc->intr_ids->mbhc_btn_release_intr);
+        }
+    }
+}
+EXPORT_SYMBOL(wcd_disable_button_event_for_factory);
+#endif
+/*steve_chen --*/
+
 static int wcd_mbhc_get_button_mask(u16 btn)
 {
 	int mask = 0;
@@ -1399,9 +1462,9 @@ static int wcd_mbhc_get_button_mask(u16 btn)
 	case 7:
 		mask = SND_JACK_BTN_3;
 		break;
-	case 15:
+	/*case 15:
 		mask = SND_JACK_BTN_4;
-		break;
+		break;*/
 	default:
 		break;
 	}
@@ -1676,6 +1739,13 @@ irqreturn_t wcd_mbhc_btn_press_handler(int irq, void *data)
 		goto done;
 	}
 	result1 = snd_soc_read(codec, MSM8X16_WCD_A_ANALOG_MBHC_BTN_RESULT);
+
+	printk("%s:result1 = %x\n",__func__,result1);
+	if (result1 == 0xf) {
+		mbhc->is_btn_press = false;
+		goto done;
+	}
+
 	mask = wcd_mbhc_get_button_mask(result1);
 	mbhc->buttons_pressed |= mask;
 	wcd9xxx_spmi_lock_sleep();
@@ -1745,6 +1815,10 @@ static irqreturn_t wcd_mbhc_release_handler(int irq, void *data)
 			}
 		}
 		mbhc->buttons_pressed &= ~WCD_MBHC_JACK_BUTTON_MASK;
+	}
+	else
+	{
+		pr_debug("%s: Unexpected irq\n",__func__);
 	}
 exit:
 	pr_debug("%s: leave\n", __func__);
@@ -2054,6 +2128,14 @@ int wcd_mbhc_init(struct wcd_mbhc *mbhc, struct snd_soc_codec *codec,
 		ret = snd_jack_set_key(mbhc->button_jack.jack,
 				       SND_JACK_BTN_0,
 				       KEY_MEDIA);
+
+		ret = snd_jack_set_key(mbhc->button_jack.jack,
+				       SND_JACK_BTN_2,
+				       KEY_VOLUMEUP);
+
+		ret = snd_jack_set_key(mbhc->button_jack.jack,
+				       SND_JACK_BTN_3,
+				       KEY_VOLUMEDOWN);
 		if (ret) {
 			pr_err("%s: Failed to set code for btn-0\n",
 				__func__);

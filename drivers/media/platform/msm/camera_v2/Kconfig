@@ -156,24 +156,25 @@ config OV5648
 		snapshot set to 2592*1944 at 12 fps,
 		This sensor driver does not support auto focus.
 
-config MT9M114
-	bool "Sensor MT9M114 (YUV 1.26MP)"
+config OV7695
+	bool "Sensor OV7695 (YUV 0.3MP)"
 	depends on MSMB_CAMERA
 	---help---
-		MT9M114 is Aptina YUV sensor. It supports 1.26 MP preview
+		OV7695 is Omnivision YUV sensor. It supports 0.3 MP preview
 		and snapshot. The preview and snapshot resolution shall be
-		1280 * 270. It does not support auto focus. It supports
-		few special effects like saturation.
-config OV5645
-	bool "Sensor OV5645 (YUV 5.0MP)"
-	depends on MSMB_CAMERA
-	---help---
-		OV5645 is Omnivision YUV sensor. It supports 5.0 MP preview
-		and snapshot. The preview and snapshot resolution shall be
-		1280 * 270. It does not support auto focus. It supports
+		VGA. It does not support auto focus. It supports
 		few special effects like saturation.
 
-config OV7695
+config T4K37
+	bool "Sensor OV7695 (YUV 0.3MP)"
+	depends on MSMB_CAMERA
+	---help---
+		OV7695 is Omnivision YUV sensor. It supports 0.3 MP preview
+		and snapshot. The preview and snapshot resolution shall be
+		VGA. It does not support auto focus. It supports
+		few special effects like saturation.
+
+config T4K35
 	bool "Sensor OV7695 (YUV 0.3MP)"
 	depends on MSMB_CAMERA
 	---help---

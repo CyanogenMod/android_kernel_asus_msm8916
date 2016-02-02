@@ -24,6 +24,19 @@
 #define FT6X06_ID		0x06
 #define FT6X36_ID       0x36
 
+#define FTS_APK_DEBUG
+//#define CONFIG_TOUCHPANEL_PROXIMITY_SENSOR
+
+#define TPD_MAX_POINTS_2                        2
+#define TPD_MAX_POINTS_5                        5
+#define TPD_MAX_POINTS_10                        10
+
+#define AUTO_CLB_NEED                           1
+#define AUTO_CLB_NONEED                         0
+
+#define FTS_NAME	"fts_wq"
+
+
 struct fw_upgrade_info {
 	bool auto_cal;
 	u16 delay_aa;
@@ -43,6 +56,8 @@ struct ft5x06_ts_platform_data {
 	u32 irq_gpio_flags;
 	u32 reset_gpio;
 	u32 reset_gpio_flags;
+	u32 CTP_ID_gpio1;
+	u32 CTP_ID_gpio2;
 	u32 family_id;
 	u32 x_max;
 	u32 y_max;

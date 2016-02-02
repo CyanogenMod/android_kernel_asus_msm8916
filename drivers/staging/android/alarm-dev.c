@@ -166,8 +166,14 @@ static int alarm_set_rtc(struct timespec *ts)
 {
 	struct rtc_time new_rtc_tm;
 	struct rtc_device *rtc_dev;
+	struct timespec tmp_time;
+	struct rtc_time ori_time,new_time;
 	unsigned long flags;
 	int rv = 0;
+
+	getnstimeofday(&tmp_time);
+	tmp_time.tv_sec -=sys_tz.tz_minuteswest*60;
+	rtc_time_to_tm(tmp_time.tv_sec,&ori_time);
 
 	rtc_time_to_tm(ts->tv_sec, &new_rtc_tm);
 	rtc_dev = alarmtimer_get_rtcdev();
@@ -180,8 +186,23 @@ static int alarm_set_rtc(struct timespec *ts)
 	spin_lock_irqsave(&alarm_slock, flags);
 	alarm_pending |= ANDROID_ALARM_TIME_CHANGE_MASK;
 	wake_up(&alarm_wait_queue);
+	getnstimeofday(&tmp_time);
+	tmp_time.tv_sec -=sys_tz.tz_minuteswest*60;
+	rtc_time_to_tm(tmp_time.tv_sec,&new_time);
 	spin_unlock_irqrestore(&alarm_slock, flags);
-
+	ASUSEvtlog("[UTS] RTC update: Current Datetime: %04d-%02d-%02d %02d:%02d:%02d,Update Datetime: %04d-%02d-%02d %02d:%02d:%02d\r\n",
+		ori_time.tm_year+1900,
+		ori_time.tm_mon+1,
+		ori_time.tm_mday,
+		ori_time.tm_hour,
+		ori_time.tm_min,
+		ori_time.tm_sec,
+		new_time.tm_year+1900,
+		new_time.tm_mon+1,
+		new_time.tm_mday,
+		new_time.tm_hour,
+		new_time.tm_min,
+		new_time.tm_sec);
 	return rv;
 }
 

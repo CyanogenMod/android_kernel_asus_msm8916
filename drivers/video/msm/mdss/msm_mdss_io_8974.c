@@ -815,6 +815,7 @@ static void mdss_dsi_link_clk_unprepare(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 	clk_unprepare(ctrl_pdata->byte_clk);
 	clk_unprepare(ctrl_pdata->esc_clk);
 }
+extern char asus_lcd_id[2];
 
 static int mdss_dsi_link_clk_set_rate(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
@@ -825,6 +826,11 @@ static int mdss_dsi_link_clk_set_rate(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
+
+	if(asus_lcd_id[0]=='0'){
+		printk(KERN_EMERG "[DISPLAY] %s esc 9600000 for CPT\n",__func__);
+		esc_clk_rate = 9600000;
+		}
 
 	if (!ctrl_pdata->panel_data.panel_info.cont_splash_enabled) {
 		pr_debug("%s: Set clk rates: pclk=%d, byteclk=%d escclk=%d\n",

@@ -505,6 +505,7 @@ static struct msm_soc_info cpu_of_id[] = {
 };
 
 static enum msm_cpu cur_cpu;
+static char OLIVER_CPU_revision[20];//OLIVER
 static int current_image;
 
 static struct socinfo_v1 dummy_socinfo = {
@@ -635,6 +636,14 @@ enum msm_cpu socinfo_get_msm_cpu(void)
 	return cur_cpu;
 }
 EXPORT_SYMBOL_GPL(socinfo_get_msm_cpu);
+
+//<OLIVER>
+char* OLIVER_socinfo_get_msm_cpu_revision(void)
+{
+	return OLIVER_CPU_revision;
+}
+EXPORT_SYMBOL_GPL(OLIVER_socinfo_get_msm_cpu_revision);
+//<OLIVER>
 
 static ssize_t
 msm_get_vendor(struct device *dev,
@@ -1079,12 +1088,21 @@ static void __init populate_soc_sysfs_files(struct device *msm_soc_device)
 static void  __init soc_info_populate(struct soc_device_attribute *soc_dev_attr)
 {
 	uint32_t soc_version = socinfo_get_version();
+	int ret;//OLIVER
 
 	soc_dev_attr->soc_id   = kasprintf(GFP_KERNEL, "%d", socinfo_get_id());
 	soc_dev_attr->machine  = "Snapdragon";
 	soc_dev_attr->revision = kasprintf(GFP_KERNEL, "%u.%u",
 			SOCINFO_VERSION_MAJOR(soc_version),
 			SOCINFO_VERSION_MINOR(soc_version));
+	//<OLIVER>
+	//printk("OLIVER CPU revision: %s,sizeof: %lu strlen: %lu\n",soc_dev_attr->revision,sizeof(soc_dev_attr->revision),strlen(soc_dev_attr->revision));
+	ret = snprintf(OLIVER_CPU_revision, sizeof(soc_dev_attr->revision), "%s", soc_dev_attr->revision);
+	if (ret < 0) {
+		printk("OLIVER Error converting log level from int to char\n");
+	}
+	//printk("OLIVER CPU revision: %s\n",OLIVER_CPU_revision);
+	//<OLIVER>
 	return;
 
 }

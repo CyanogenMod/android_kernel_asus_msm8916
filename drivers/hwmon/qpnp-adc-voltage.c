@@ -2080,6 +2080,79 @@ hwmon_err_sens:
 	return rc;
 }
 
+#if defined(ASUS_FACTORY_BUILD)//jevian ++
+#include <linux/proc_fs.h>
+#include <linux/qpnp/qpnp-adc.h>
+struct device fac_qpnp_vadc_dev;
+ssize_t fac_xo_therm_read (struct file *filp, char __user *userbuf, size_t size, loff_t *loff_p)
+{
+	int rc = -1,len;
+	char kernelbuf[64];
+	struct qpnp_vadc_result result;
+	struct qpnp_vadc_chip *vadc = dev_get_drvdata(&fac_qpnp_vadc_dev);
+	rc = qpnp_vadc_read(vadc, LR_MUX3_XO_THERM, &result);
+	if (rc) {
+		pr_err("VADC read error with %d\n", rc);
+		return 0;
+	}
+	len = sprintf(kernelbuf,"%lld\n",result.physical*1000);
+	return simple_read_from_buffer(userbuf, size,loff_p,kernelbuf,len);
+}
+struct file_operations fac_xo_therm_fops = {
+	.read=fac_xo_therm_read,
+};
+ssize_t fac_pa_therm0_read (struct file *filp, char __user *userbuf, size_t size, loff_t *loff_p)
+{
+	int rc = -1,len;
+	char kernelbuf[64];
+	struct qpnp_vadc_result result;
+	struct qpnp_vadc_chip *vadc = dev_get_drvdata(&fac_qpnp_vadc_dev);
+	rc = qpnp_vadc_read(vadc, LR_MUX7_HW_ID, &result);
+	if (rc) {
+		pr_err("VADC read error with %d\n", rc);
+		return 0;
+	}
+	len = sprintf(kernelbuf,"%lld\n",result.physical*1000);
+	return simple_read_from_buffer(userbuf, size,loff_p,kernelbuf,len);
+}
+struct file_operations fac_pa_therm0_fops = {
+	.read=fac_pa_therm0_read,
+};
+ssize_t printklog_write (struct file *filp, const char __user *userbuf, size_t size, loff_t *loff_p)
+{
+	char str[128];
+	if(size < 128)
+	{
+		strncpy(str,userbuf,size);
+		str[size]='\0';
+	}
+	else
+	{
+		strncpy(str,userbuf,127);
+		str[127]='\0';
+	}
+	printk(KERN_ERR"[factool log]:%s",str);
+	return size;
+}
+struct file_operations printklog_fops = {
+	.write=printklog_write,
+};
+unsigned char jevian_wakeup_sign = 0;
+extern void release_wakeup_source(void);
+extern void alarm_irq_disable(void);
+ssize_t fac_tool_node_write(struct file *filp, const char __user *userbuf, size_t size, loff_t *loff_p)
+{
+	printk(KERN_ERR"[factool log]:fac node cmd:%c\n",userbuf[0]);
+	switch(userbuf[0]) {
+		case '0':jevian_wakeup_sign = 0;break;
+		case '1':jevian_wakeup_sign = 1;release_wakeup_source();alarm_irq_disable();break;
+	}
+	return size;
+}
+struct file_operations fac_tool_node_fops = {
+	.write=fac_tool_node_write,
+};
+#endif//jevian --
 static int qpnp_vadc_probe(struct spmi_device *spmi)
 {
 	struct qpnp_vadc_chip *vadc;
@@ -2133,6 +2206,25 @@ static int qpnp_vadc_probe(struct spmi_device *spmi)
 		dev_err(&spmi->dev, "failed to initialize qpnp hwmon adc\n");
 		return rc;
 	}
+#if defined(ASUS_FACTORY_BUILD)//jevian ++
+	fac_qpnp_vadc_dev = spmi->dev;
+	if(proc_create("fac_xo_therm", 0777, NULL, &fac_xo_therm_fops)==NULL)
+	{
+		printk(KERN_ERR"create fac_xo_therm inode is error\n");
+	}
+	if(proc_create("fac_pa_therm0", 0777, NULL, &fac_pa_therm0_fops)==NULL)
+	{
+		printk(KERN_ERR"create fac_pa_therm0 inode is error\n");
+	}
+	if(proc_create("fac_printklog", 0777, NULL, &printklog_fops)==NULL)
+	{
+		printk(KERN_ERR"create printklog node is error\n");
+	}
+	if(proc_create("fac_tool_node", 0777, NULL, &fac_tool_node_fops)==NULL)
+	{
+		printk(KERN_ERR"create fac_tool_node is error\n");
+	}
+#endif//jevian --
 	vadc->vadc_hwmon = hwmon_device_register(&vadc->adc->spmi->dev);
 	vadc->vadc_init_calib = false;
 	vadc->max_channels_available = count_adc_channel_list;

@@ -190,6 +190,8 @@ enum dsi_pm_type {
 extern struct device dsi_dev;
 extern u32 dsi_irq;
 extern struct mdss_dsi_ctrl_pdata *ctrl_list[];
+extern int fb_shutdown;
+
 
 struct dsiphy_pll_divider_config {
 	u32 clk_rate;

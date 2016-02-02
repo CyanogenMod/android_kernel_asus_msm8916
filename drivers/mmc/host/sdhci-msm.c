@@ -41,9 +41,20 @@
 #include <linux/iopoll.h>
 #include <linux/pinctrl/consumer.h>
 #include <linux/msm-bus.h>
-
+//ASUS_BSP Jeffery_Hsu+++
+#include <linux/kernel.h>
+//ASUS_BSP Jeffery_Hsu---
 #include "sdhci-pltfm.h"
-
+/*
+#ifdef pr_debug  
+#undef pr_debug  
+#define pr_debug(fmt, ...) \
+    printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)  
+#else  
+#define pr_debug(fmt, ...) \
+    printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)  
+#endif
+*/
 enum sdc_mpm_pin_state {
 	SDC_DAT1_DISABLE,
 	SDC_DAT1_ENABLE,
@@ -103,6 +114,11 @@ enum sdc_mpm_pin_state {
 #define CORE_HC_SELECT_IN_EN	(1 << 18)
 #define CORE_HC_SELECT_IN_HS400	(6 << 19)
 #define CORE_HC_SELECT_IN_MASK	(7 << 19)
+
+#define CORE_VENDOR_SPEC_FUNC2 0x110
+#define HC_SW_RST_WAIT_IDLE_DIS	(1 << 20)
+#define HC_SW_RST_REQ (1 << 21)
+#define CORE_ONE_MID_EN     (1 << 25)
 
 #define CORE_VENDOR_SPEC_CAPABILITIES0	0x11C
 #define CORE_8_BIT_SUPPORT		(1 << 18)
@@ -309,12 +325,17 @@ struct sdhci_msm_pltfm_data {
 	struct sdhci_pinctrl_data *pctrl_data;
 	u32 cpu_dma_latency_us;
 	int status_gpio; /* card detection GPIO that is configured as IRQ */
+	int pwr_en; /* card power enable */
 	struct sdhci_msm_bus_voting_data *voting_data;
 	u32 *sup_clk_table;
 	unsigned char sup_clk_cnt;
 	int mpm_sdiowakeup_int;
 	int sdiowakeup_irq;
 	enum pm_qos_req_type cpu_affinity_type;
+	struct mmc_host  *mmc;
+	//ASUS_BSP Deeo : add host_name to pdata +++
+	char *name;
+	//ASUS_BSP Deeo : add host_name to pdata ---
 };
 
 struct sdhci_msm_bus_vote {
@@ -345,6 +366,7 @@ struct sdhci_msm_host {
 	struct completion pwr_irq_completion;
 	struct sdhci_msm_bus_vote msm_bus_vote;
 	struct device_attribute	polling;
+	struct device_attribute	emmc_total_size;
 	u32 clk_rate; /* Keeps track of current clock rate that is set */
 	bool tuning_done;
 	bool calibration_done;
@@ -1488,6 +1510,7 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev)
 	int len, i, mpm_int;
 	int clk_table_len;
 	u32 *clk_table = NULL;
+	int ret = 0;
 	enum of_gpio_flags flags = OF_GPIO_ACTIVE_LOW;
 
 	pdata = devm_kzalloc(dev, sizeof(*pdata), GFP_KERNEL);
@@ -1495,7 +1518,20 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev)
 		dev_err(dev, "failed to allocate memory for platform data\n");
 		goto out;
 	}
-
+	pdata->pwr_en = of_get_named_gpio_flags(np, "cd-pwr-en", 0, &flags);
+	if (gpio_is_valid(pdata->pwr_en)) {
+                 ret = gpio_request(pdata->pwr_en, "sd_pwr_en#");
+                 if(ret){
+                         pr_debug("%s: Failed to request card power enable pin %d\n",
+                                         __func__, ret);
+                 }
+                 ret = gpio_direction_output(pdata->pwr_en, 0);
+                 if(ret){
+                         pr_debug("%s: default disable sd power %d\n",
+                                          __func__, ret);
+                 }
+         }
+	
 	pdata->status_gpio = of_get_named_gpio_flags(np, "cd-gpios", 0, &flags);
 	if (gpio_is_valid(pdata->status_gpio) & !(flags & OF_GPIO_ACTIVE_LOW))
 		pdata->caps2 |= MMC_CAP2_CD_ACTIVE_HIGH;
@@ -1977,15 +2013,67 @@ static int sdhci_msm_setup_vreg(struct sdhci_msm_pltfm_data *pdata,
 		goto out;
 	}
 
-	vreg_table[0] = curr_slot->vdd_data;
-	vreg_table[1] = curr_slot->vdd_io_data;
-
+	//ASUS_BSP : adjust SD power off sequence +++
+//<asus-bob20150421+>
+	switch (asus_PRJ_ID)
+	{
+		case ASUS_ZE600KL:
+		case ASUS_ZD550KL:
+		case ASUS_ZE550KL:
+			if (!strcmp(pdata->name,"mmc1") && !enable) {
+				vreg_table[1] = curr_slot->vdd_data;
+				vreg_table[0] = curr_slot->vdd_io_data;
+			} else {
+				vreg_table[0] = curr_slot->vdd_data;
+				vreg_table[1] = curr_slot->vdd_io_data;
+			}
+			break;
+		default:
+			vreg_table[0] = curr_slot->vdd_data;
+			vreg_table[1] = curr_slot->vdd_io_data;
+			break;
+	}
+//<asus-bob20150421->
+	//ASUS_BSP : adjust SD power off sequence ---
+	
+	pr_debug("%s: current slot name %s \n", __func__ ,mmc_hostname(pdata->mmc));
 	for (i = 0; i < ARRAY_SIZE(vreg_table); i++) {
 		if (vreg_table[i]) {
-			if (enable)
-				ret = sdhci_msm_vreg_enable(vreg_table[i]);
-			else
-				ret = sdhci_msm_vreg_disable(vreg_table[i]);
+			if(!strcmp(mmc_hostname(pdata->mmc),"mmc1") && strcmp(vreg_table[i]->name,"vdd-io")){
+				if(enable){
+					if (gpio_is_valid(pdata->pwr_en)) {
+						gpio_set_value(pdata->pwr_en, 1);
+						pr_debug("%s: enable_gpio %d\n",__func__ , gpio_get_value(pdata->pwr_en));
+					}	
+				}else{
+					if (gpio_is_valid(pdata->pwr_en)) {
+						gpio_set_value(pdata->pwr_en, 0);
+						pr_debug("%s: enable_gpio %d\n", __func__ ,gpio_get_value(pdata->pwr_en));
+					}
+				}
+			}else{
+				if (enable) {
+					ret = sdhci_msm_vreg_enable(vreg_table[i]);
+					//ASUS_BSP : add delay time after close mmc1 vdd-io +++
+//<asus-bob20150421+>
+					switch (asus_PRJ_ID)
+					{
+						case ASUS_ZE600KL:
+						case ASUS_ZD550KL:
+						case ASUS_ZE550KL:
+							if (!strcmp(pdata->name,"mmc1")) {
+								msleep(10);
+							}
+							break;
+						default:
+							break;
+					}
+//<asus-bob20150421->
+					//ASUS_BSP : add delay time after close mmc1 vdd-io ---
+				}
+				else
+					ret = sdhci_msm_vreg_disable(vreg_table[i]);
+			}
 			if (ret)
 				goto out;
 		}
@@ -2301,6 +2389,29 @@ store_sdhci_max_bus_bw(struct device *dev, struct device_attribute *attr,
 		spin_unlock_irqrestore(&host->lock, flags);
 	}
 	return count;
+}
+
+/*SDCC ATD INTERFACE*/
+/* total size is 2^n GB, e.g: 4/8/16/32/64/128 */
+static ssize_t
+show_eMMC_total_size(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	struct sdhci_host *host = dev_get_drvdata(dev);
+	struct mmc_host *mmc;
+
+	mmc = host->mmc;
+	if (mmc->card) {
+		int i = fls(mmc->card->ext_csd.sectors);
+		if (i > 21) {
+			/* 4GB or above */
+			return snprintf(buf, PAGE_SIZE, "%d\n", (mmc->card->ext_csd.sectors >> (i - 1)) << (i - 21));
+		} else {
+			pr_err("wrong sector count");
+			return 0;
+		}
+	}
+	return 0;
 }
 
 static void sdhci_msm_check_power_status(struct sdhci_host *host, u32 req_type)
@@ -2865,6 +2976,8 @@ void sdhci_msm_dump_vendor_regs(struct sdhci_host *host)
 		readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC),
 		readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC_ADMA_ERR_ADDR0),
 		readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC_ADMA_ERR_ADDR1));
+	pr_info("Vndr func2: 0x%08x\n",
+		readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC_FUNC2));
 
 	/*
 	 * tbsel indicates [2:0] bits and tbsel2 indicates [7:4] bits
@@ -2896,6 +3009,48 @@ void sdhci_msm_dump_vendor_regs(struct sdhci_host *host)
 			CORE_TESTBUS_CONFIG);
 }
 
+void sdhci_msm_reset_workaround(struct sdhci_host *host, u32 enable)
+{
+	u32 vendor_func2;
+	unsigned long timeout;
+
+	vendor_func2 = readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC_FUNC2);
+
+	if (enable) {
+		writel_relaxed(vendor_func2 | HC_SW_RST_REQ, host->ioaddr +
+				CORE_VENDOR_SPEC_FUNC2);
+		timeout = 10000;
+		while (readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC_FUNC2) &
+				HC_SW_RST_REQ) {
+			if (timeout == 0) {
+				pr_info("%s: Applying wait idle disable workaround\n",
+					mmc_hostname(host->mmc));
+				/*
+				 * Apply the reset workaround to not wait for
+				 * pending data transfers on AXI before
+				 * resetting the controller. This could be
+				 * risky if the transfers were stuck on the
+				 * AXI bus.
+				 */
+				vendor_func2 = readl_relaxed(host->ioaddr +
+						CORE_VENDOR_SPEC_FUNC2);
+				writel_relaxed(vendor_func2 |
+					HC_SW_RST_WAIT_IDLE_DIS,
+					host->ioaddr + CORE_VENDOR_SPEC_FUNC2);
+				host->reset_wa_t = ktime_get();
+				return;
+			}
+			timeout--;
+			udelay(10);
+		}
+		pr_info("%s: waiting for SW_RST_REQ is successful\n",
+				mmc_hostname(host->mmc));
+	} else {
+		writel_relaxed(vendor_func2 & ~HC_SW_RST_WAIT_IDLE_DIS,
+				host->ioaddr + CORE_VENDOR_SPEC_FUNC2);
+	}
+}
+
 static struct sdhci_ops sdhci_msm_ops = {
 	.set_uhs_signaling = sdhci_msm_set_uhs_signaling,
 	.check_power_status = sdhci_msm_check_power_status,
@@ -2909,6 +3064,7 @@ static struct sdhci_ops sdhci_msm_ops = {
 	.dump_vendor_regs = sdhci_msm_dump_vendor_regs,
 	.config_auto_tuning_cmd = sdhci_msm_config_auto_tuning_cmd,
 	.enable_controller_clock = sdhci_msm_enable_controller_clock,
+	.reset_workaround = sdhci_msm_reset_workaround,
 };
 
 static int sdhci_msm_cfg_mpm_pin_wakeup(struct sdhci_host *host, unsigned mode)
@@ -2949,6 +3105,7 @@ static void sdhci_set_default_hw_caps(struct sdhci_msm_host *msm_host,
 	u32 version, caps;
 	u16 minor;
 	u8 major;
+	u32 val;
 
 	version = readl_relaxed(msm_host->core_mem + CORE_MCI_VERSION);
 	major = (version & CORE_VERSION_MAJOR_MASK) >>
@@ -2978,6 +3135,16 @@ static void sdhci_set_default_hw_caps(struct sdhci_msm_host *msm_host,
 			caps), host->ioaddr + CORE_VENDOR_SPEC_CAPABILITIES0);
 	}
 
+	/*
+	 * Enable one MID mode for SDCC5 (major 1) on 8916/8939 (minor 0x2e) and
+	 * on 8992 (minor 0x3e) as a workaround to reset for data stuck issue.
+	 */
+	if (major == 1 && (minor == 0x2e || minor == 0x3e)) {
+		host->quirks2 |= SDHCI_QUIRK2_USE_RESET_WORKAROUND;
+		val = readl_relaxed(host->ioaddr + CORE_VENDOR_SPEC_FUNC2);
+		writel_relaxed((val | CORE_ONE_MID_EN),
+			host->ioaddr + CORE_VENDOR_SPEC_FUNC2);
+	}
 	/*
 	 * SDCC 5 controller with major version 1, minor version 0x34 and later
 	 * with HS 400 mode support will use CM DLL instead of CDC LP 533 DLL.
@@ -3047,10 +3214,32 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 			dev_err(&pdev->dev, "DT parsing error\n");
 			goto pltfm_free;
 		}
+		
+		//ASUS_BSP Deeo : add host_name to pdata +++
+//<asus-bob20150421+>
+		switch (asus_PRJ_ID)
+		{
+			case ASUS_ZE600KL:
+			case ASUS_ZD550KL:
+			case ASUS_ZE550KL:
+				if (!strcmp(mmc_hostname(msm_host->mmc), "mmc1")) {
+					msm_host->pdata->name = "mmc1";
+				}
+				else {
+					msm_host->pdata->name = "";
+				}
+				break;
+			default:
+				break;
+			}
+//<asus-bob20150421->
+		//ASUS_BSP Deeo : add host_name to pdata ---
+		
 	} else {
 		dev_err(&pdev->dev, "No device tree node\n");
 		goto pltfm_free;
 	}
+	msm_host->pdata->mmc = host->mmc;
 
 	/* Setup Clocks */
 
@@ -3346,6 +3535,18 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	if (ret)
 		goto remove_host;
 
+	msm_host->emmc_total_size.show = show_eMMC_total_size;
+//	msm_host->emmc_total_size..store = NULL;
+	sysfs_attr_init(&msm_host->emmc_total_size.attr);
+	msm_host->emmc_total_size.attr.name = "emmc_total_size";
+	msm_host->emmc_total_size.attr.mode = S_IRUGO;
+	ret = device_create_file(&pdev->dev, &msm_host->emmc_total_size);
+	if (ret) {
+		pr_err("%s: %s: failed creating emmc_total_size: %d\n",
+			   mmc_hostname(host->mmc), __func__, ret);
+		device_remove_file(&pdev->dev, &msm_host->emmc_total_size);
+	}
+
 	if (!gpio_is_valid(msm_host->pdata->status_gpio)) {
 		msm_host->polling.show = show_polling;
 		msm_host->polling.store = store_polling;
@@ -3579,8 +3780,10 @@ static int sdhci_msm_suspend(struct device *dev)
 	struct sdhci_msm_host *msm_host = pltfm_host->priv;
 	int ret = 0;
 
-	if (gpio_is_valid(msm_host->pdata->status_gpio))
-		mmc_gpio_free_cd(msm_host->mmc);
+	if (gpio_is_valid(msm_host->pdata->status_gpio)){
+		//mmc_gpio_free_cd(msm_host->mmc);
+		enable_irq_wake(gpio_to_irq(msm_host->pdata->status_gpio));
+	}
 
 	if (pm_runtime_suspended(dev)) {
 		pr_debug("%s: %s: already runtime suspended\n",
@@ -3601,11 +3804,14 @@ static int sdhci_msm_resume(struct device *dev)
 	int ret = 0;
 
 	if (gpio_is_valid(msm_host->pdata->status_gpio)) {
+/*
 		ret = mmc_gpio_request_cd(msm_host->mmc,
 				msm_host->pdata->status_gpio);
 		if (ret)
 			pr_err("%s: %s: Failed to request card detection IRQ %d\n",
 					mmc_hostname(host->mmc), __func__, ret);
+*/
+		disable_irq_wake(gpio_to_irq(msm_host->pdata->status_gpio));
 	}
 
 	if (pm_runtime_suspended(dev)) {

@@ -40,6 +40,9 @@ enum {
 
 static void __iomem *virt_bases[N_BASES];
 
+extern char asus_lcd_id[2];
+
+
 #define GCC_REG_BASE(x) (void __iomem *)(virt_bases[GCC_BASE] + (x))
 
 #define GPLL0_MODE					0x21000
@@ -345,6 +348,7 @@ static struct pll_freq_tbl apcs_pll_freq[] = {
 	F_APCS_PLL(1190400000, 62, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1209600000, 63, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1248000000, 65, 0x0, 0x1, 0x0, 0x0, 0x0),
+	F_APCS_PLL(1363200000, 71, 0x0, 0x1, 0x0, 0x0, 0x0),
 	F_APCS_PLL(1401600000, 73, 0x0, 0x1, 0x0, 0x0, 0x0),
 	PLL_F_END
 };
@@ -907,6 +911,7 @@ static struct rcg_clk jpeg0_clk_src = {
 
 static struct clk_freq_tbl ftbl_gcc_camss_mclk0_1_clk[] = {
 	F(   9600000,	      xo,   2,	  0,	0),
+	F(   19200000,	      xo,   1,	  0,	0),
 	F(  23880000,      gpll0,   1,    2,   67),
 	F(  66670000,	   gpll0,  12,	  0,	0),
 	F_END
@@ -1062,9 +1067,14 @@ static struct rcg_clk byte0_clk_src = {
 };
 
 static struct clk_freq_tbl ftbl_gcc_mdss_esc0_clk[] = {
-	F(  19200000,	      xo,   1,	  0,	0),
+	F(  19200000,         xo,   1,    0,    0),
 	F_END
 };
+static struct clk_freq_tbl ftbl_gcc_mdss_esc0_clk_cpt[] = {
+	F(  9600000,	      xo,   2,	  0,	0),
+	F_END
+};
+
 
 static struct rcg_clk esc0_clk_src = {
 	.cmd_rcgr_reg = ESC0_CMD_RCGR,
@@ -2832,6 +2842,10 @@ static struct platform_driver msm_clock_gcc_driver = {
 
 static int __init msm_gcc_init(void)
 {
+	if(asus_lcd_id[0]=='0'){
+		printk(KERN_EMERG "[DISPLAY] %s esc 9600000 for CPT\n",__func__);
+		esc0_clk_src.freq_tbl=ftbl_gcc_mdss_esc0_clk_cpt;
+		}
 	return	platform_driver_register(&msm_clock_gcc_driver);
 }
 arch_initcall(msm_gcc_init);
@@ -2902,6 +2916,7 @@ static struct platform_driver msm_clock_debug_driver = {
 
 static int __init msm_clock_debug_init(void)
 {
+
 	return platform_driver_register(&msm_clock_debug_driver);
 }
 late_initcall(msm_clock_debug_init);

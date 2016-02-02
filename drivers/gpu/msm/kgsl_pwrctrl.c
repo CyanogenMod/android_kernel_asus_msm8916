@@ -177,7 +177,7 @@ void kgsl_pwrctrl_buslevel_update(struct kgsl_device *device,
 	 * otherwise request bus level 0, off.
 	 */
 	if (on) {
-		buslevel = min_t(int, pwr->pwrlevels[0].bus_freq,
+		buslevel = min_t(int, pwr->pwrlevels[0].bus_max,
 				cur + pwr->bus_mod);
 		buslevel = max_t(int, buslevel, 1);
 	} else {
@@ -992,6 +992,10 @@ void kgsl_pwrctrl_busy_time(struct kgsl_device *device, u64 time, u64 busy)
 }
 EXPORT_SYMBOL(kgsl_pwrctrl_busy_time);
 
+//ASUS Joy_Lin +++
+extern int asus_sb_enable;
+static int asus_sb_test = 0;
+//ASUS Joy_Lin ---
 void kgsl_pwrctrl_clk(struct kgsl_device *device, int state,
 					  int requested_state)
 {
@@ -1001,6 +1005,21 @@ void kgsl_pwrctrl_clk(struct kgsl_device *device, int state,
 	if (test_bit(KGSL_PWRFLAGS_CLK_ON, &pwr->ctrl_flags))
 		return;
 
+	//ASUS Joy_Lin +++
+	if(asus_sb_enable == 1 && asus_sb_test == 0)
+	{
+		pwr->min_pwrlevel = 1;
+		asus_sb_test = 1;
+		printk("ASUS SB enable\n");
+	}
+	else if(asus_sb_enable == 0 && asus_sb_test == 1)
+	{
+		pwr->min_pwrlevel = pwr->num_pwrlevels - 1;
+		asus_sb_test = 0;
+		printk("ASUS SB disable\n");
+	}
+	//ASUS Joy_Lin ---
+	
 	if (state == KGSL_PWRFLAGS_OFF) {
 		if (test_and_clear_bit(KGSL_PWRFLAGS_CLK_ON,
 			&pwr->power_flags)) {

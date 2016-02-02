@@ -2656,11 +2656,17 @@ EXPORT_SYMBOL(mmc_can_discard);
 
 int mmc_can_sanitize(struct mmc_card *card)
 {
-	if (!mmc_can_trim(card) && !mmc_can_erase(card))
+// turn off sanitize ASUS_BSP weixin
+	if(MMC_CONFIG_SETTING_SANITIZE){
+		if (!mmc_can_trim(card) && !mmc_can_erase(card))
+			return 0;
+		if (card->ext_csd.sec_feature_support & EXT_CSD_SEC_SANITIZE)
+			return 1;
 		return 0;
-	if (card->ext_csd.sec_feature_support & EXT_CSD_SEC_SANITIZE)
-		return 1;
-	return 0;
+	}
+	else
+		return 0;
+// turn off sanitize ASUS_BSP weixin
 }
 EXPORT_SYMBOL(mmc_can_sanitize);
 

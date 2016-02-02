@@ -1,0 +1,31 @@
+charger_version: 0.0.1
+//porting guide 20150316
+gauge_version:   0.0.1
+
+charger_version: 0.0.2
+//add factory charger limit 20150414
+
+charger_version: 0.0.3
+//when dut first auto boot into charger mode,fix charger led not light. 20150415
+
+charger_version: 0.0.4
+//porting guide 20150410 1.add 5w retry 2.remove 7w adp 
+
+charger_version: 0.0.4
+//add factory charger voltage read node ,change unit from uV to mV
+
+charger_version: 0.0.5
+//add fastcharger themal policy
+
+gauge_version:   0.0.2
+charger_version: 0.0.5
+//disable charger when read battery id
+
+gauge_version:   0.0.3
+//add battery full condition,rsoc>=98%
+
+gauge_version:   0.0.4
+//add battery version in setting
+
+charger_version: 0.0.7
+//add quick charging v1 status

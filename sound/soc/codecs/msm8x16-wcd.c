@@ -46,6 +46,14 @@
 #include "msm8916-wcd-irq.h"
 #include "msm8x16_wcd_registers.h"
 
+/* steve_chen ++ */
+#include <linux/proc_fs.h>
+struct msm8x16_wcd_priv *g_msm8x16_wcd_priv;
+int g_DebugMode = 1;
+extern int g_gpio_audio_debug;
+int fac_test_result = 0;
+/* steve_chen-- */
+
 #define MSM8X16_WCD_RATES (SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |\
 			SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_48000)
 #define MSM8X16_WCD_FORMATS (SNDRV_PCM_FMTBIT_S16_LE |\
@@ -96,7 +104,7 @@ enum {
 #define SPK_PMD 2
 #define SPK_PMU 3
 
-#define MICBIAS_DEFAULT_VAL 1800000
+#define MICBIAS_DEFAULT_VAL 2800000
 #define MICBIAS_MIN_VAL 1600000
 #define MICBIAS_STEP_SIZE 50000
 
@@ -657,9 +665,16 @@ static void msm8x16_wcd_boost_on(struct snd_soc_codec *codec)
 	snd_soc_update_bits(codec,
 		MSM8X16_WCD_A_ANALOG_SPKR_DAC_CTL,
 		0x03, 0x03);
-	snd_soc_update_bits(codec,
-		MSM8X16_WCD_A_ANALOG_SPKR_OCP_CTL,
-		0xE1, 0xE1);
+	if (asus_PRJ_ID == ASUS_ZD550KL){
+		snd_soc_update_bits(codec,
+			MSM8X16_WCD_A_ANALOG_SPKR_OCP_CTL,
+			0xF1, 0xF1);
+
+	}else {
+		snd_soc_update_bits(codec,
+			MSM8X16_WCD_A_ANALOG_SPKR_OCP_CTL,
+			0xE1, 0xE1);
+	}
 	snd_soc_update_bits(codec,
 		MSM8X16_WCD_A_DIGITAL_CDC_DIG_CLK_CTL,
 		0x20, 0x20);
@@ -1084,6 +1099,39 @@ out:
 	return ret;
 }
 
+static int msm8x16_wcd_codec_enable_clock_block(struct snd_soc_codec *codec,
+						int enable)
+{
+	struct msm8916_asoc_mach_data *pdata = NULL;
+
+	pdata = snd_soc_card_get_drvdata(codec->card);
+	if (enable) {
+		snd_soc_update_bits(codec,
+			MSM8X16_WCD_A_CDC_CLK_MCLK_CTL, 0x01, 0x01);
+		snd_soc_update_bits(codec,
+			MSM8X16_WCD_A_CDC_CLK_PDM_CTL, 0x03, 0x03);
+		snd_soc_update_bits(codec,
+			MSM8X16_WCD_A_ANALOG_MASTER_BIAS_CTL, 0x30, 0x30);
+		snd_soc_update_bits(codec,
+			MSM8X16_WCD_A_DIGITAL_CDC_RST_CTL, 0x80, 0x80);
+		snd_soc_update_bits(codec,
+			MSM8X16_WCD_A_DIGITAL_CDC_TOP_CLK_CTL, 0x0C, 0x0C);
+		if (pdata->mclk_freq == 12288000)
+			snd_soc_update_bits(codec,
+				MSM8X16_WCD_A_CDC_TOP_CTL, 0x01, 0x00);
+		else if (pdata->mclk_freq == 9600000)
+			snd_soc_update_bits(codec,
+				MSM8X16_WCD_A_CDC_TOP_CTL, 0x01, 0x01);
+	} else {
+		snd_soc_update_bits(codec,
+			MSM8X16_WCD_A_DIGITAL_CDC_TOP_CLK_CTL, 0x0C, 0x00);
+		snd_soc_update_bits(codec,
+				MSM8X16_WCD_A_CDC_CLK_PDM_CTL, 0x03, 0x00);
+
+	}
+	return 0;
+}
+
 static int msm8x16_wcd_codec_enable_charge_pump(struct snd_soc_dapm_widget *w,
 		struct snd_kcontrol *kcontrol, int event)
 {
@@ -1093,6 +1141,7 @@ static int msm8x16_wcd_codec_enable_charge_pump(struct snd_soc_dapm_widget *w,
 	dev_dbg(codec->dev, "%s: event = %d\n", __func__, event);
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		msm8x16_wcd_codec_enable_clock_block(codec, 1);
 		if (!(strcmp(w->name, "EAR CP"))) {
 			snd_soc_update_bits(codec,
 					MSM8X16_WCD_A_DIGITAL_CDC_DIG_CLK_CTL,
@@ -2232,9 +2281,20 @@ static int msm8x16_wcd_codec_enable_spk_pa(struct snd_soc_dapm_widget *w,
 		switch (msm8x16_wcd->boost_option) {
 		case BOOST_SWITCH:
 			if (msm8x16_wcd->spk_boost_set)
-				snd_soc_update_bits(codec,
-					MSM8X16_WCD_A_ANALOG_SPKR_DRV_CTL,
-					0xEF, 0xEF);
+				//asus_jeffery+++
+				if (asus_PRJ_ID == ASUS_ZD550KL) {
+					snd_soc_update_bits(codec,
+						MSM8X16_WCD_A_ANALOG_SPKR_DRV_CTL,
+						0xEF, 0xEE);
+				} else if (asus_PRJ_ID == ASUS_ZE550KL) {
+					snd_soc_update_bits(codec,
+						MSM8X16_WCD_A_ANALOG_SPKR_DRV_CTL,
+						0xEF, 0xEE);
+				} else {
+					snd_soc_update_bits(codec,
+						MSM8X16_WCD_A_ANALOG_SPKR_DRV_CTL,
+						0xEF, 0xEF);
+				}
 			else
 				snd_soc_update_bits(codec,
 					MSM8X16_WCD_A_ANALOG_SPKR_DAC_CTL,
@@ -2242,9 +2302,20 @@ static int msm8x16_wcd_codec_enable_spk_pa(struct snd_soc_dapm_widget *w,
 			break;
 		case BOOST_ALWAYS:
 		case BOOST_ON_FOREVER:
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_ANALOG_SPKR_DRV_CTL,
-				0xEF, 0xEF);
+			//asus_jeffery+++
+			if (asus_PRJ_ID == ASUS_ZD550KL) {
+				snd_soc_update_bits(codec,
+					MSM8X16_WCD_A_ANALOG_SPKR_DRV_CTL,
+					0xEF, 0xEE);
+			} else if (asus_PRJ_ID == ASUS_ZE550KL) {
+				snd_soc_update_bits(codec,
+					MSM8X16_WCD_A_ANALOG_SPKR_DRV_CTL,
+					0xEF, 0xEE);
+			} else {
+				snd_soc_update_bits(codec,
+					MSM8X16_WCD_A_ANALOG_SPKR_DRV_CTL,
+					0xEF, 0xEF);
+			}
 			break;
 		case BYPASS_ALWAYS:
 			snd_soc_update_bits(codec,
@@ -2269,7 +2340,8 @@ static int msm8x16_wcd_codec_enable_spk_pa(struct snd_soc_dapm_widget *w,
 		usleep_range(CODEC_DELAY_1_MS, CODEC_DELAY_1_1_MS);
 		snd_soc_update_bits(codec,
 			MSM8X16_WCD_A_ANALOG_SPKR_DAC_CTL, 0x10, 0x10);
-		msm8x16_wcd_boost_mode_sequence(codec, SPK_PMD);
+		if (get_codec_version(msm8x16_wcd) < CAJON_2_0)
+			msm8x16_wcd_boost_mode_sequence(codec, SPK_PMD);
 		snd_soc_update_bits(codec, w->reg, 0x80, 0x00);
 		switch (msm8x16_wcd->boost_option) {
 		case BOOST_SWITCH:
@@ -2305,6 +2377,8 @@ static int msm8x16_wcd_codec_enable_spk_pa(struct snd_soc_dapm_widget *w,
 				MSM8X16_WCD_A_ANALOG_RX_EAR_CTL, 0x01, 0x00);
 		snd_soc_update_bits(codec,
 			MSM8X16_WCD_A_DIGITAL_CDC_ANA_CLK_CTL, 0x10, 0x00);
+		if (get_codec_version(msm8x16_wcd) >= CAJON_2_0)
+			msm8x16_wcd_boost_mode_sequence(codec, SPK_PMD);
 		break;
 	}
 	return 0;
@@ -2323,6 +2397,7 @@ static int msm8x16_wcd_codec_enable_dig_clk(struct snd_soc_dapm_widget *w,
 			event, w->name);
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
+		msm8x16_wcd_codec_enable_clock_block(codec, 1);
 		snd_soc_update_bits(codec, w->reg, 0x80, 0x80);
 		msm8x16_wcd_boost_mode_sequence(codec, SPK_PMU);
 		break;
@@ -2781,25 +2856,26 @@ static int msm8x16_wcd_codec_enable_interpolator(struct snd_soc_dapm_widget *w,
 		/*
 		 * disable the mute enabled during the PMD of this device
 		 */
-		if (msm8x16_wcd->mute_mask & HPHL_PA_DISABLE) {
+		if ((w->shift == 0) &&
+			(msm8x16_wcd->mute_mask & HPHL_PA_DISABLE)) {
 			pr_debug("disabling HPHL mute\n");
 			snd_soc_update_bits(codec,
 				MSM8X16_WCD_A_CDC_RX1_B6_CTL, 0x01, 0x00);
 			msm8x16_wcd->mute_mask &= ~(HPHL_PA_DISABLE);
-		}
-		if (msm8x16_wcd->mute_mask & HPHR_PA_DISABLE) {
+		} else if ((w->shift == 1) &&
+				(msm8x16_wcd->mute_mask & HPHR_PA_DISABLE)) {
 			pr_debug("disabling HPHR mute\n");
 			snd_soc_update_bits(codec,
 				MSM8X16_WCD_A_CDC_RX2_B6_CTL, 0x01, 0x00);
 			msm8x16_wcd->mute_mask &= ~(HPHR_PA_DISABLE);
-		}
-		if (msm8x16_wcd->mute_mask & SPKR_PA_DISABLE) {
+		} else if ((w->shift == 2) &&
+				(msm8x16_wcd->mute_mask & SPKR_PA_DISABLE)) {
 			pr_debug("disabling SPKR mute\n");
 			snd_soc_update_bits(codec,
 				MSM8X16_WCD_A_CDC_RX3_B6_CTL, 0x01, 0x00);
 			msm8x16_wcd->mute_mask &= ~(SPKR_PA_DISABLE);
-		}
-		if (msm8x16_wcd->mute_mask & EAR_PA_DISABLE) {
+		} else if ((w->shift == 0) &&
+				(msm8x16_wcd->mute_mask & EAR_PA_DISABLE)) {
 			pr_debug("disabling EAR mute\n");
 			snd_soc_update_bits(codec,
 				MSM8X16_WCD_A_CDC_RX1_B6_CTL, 0x01, 0x00);
@@ -2993,13 +3069,11 @@ static int msm8x16_wcd_hph_pa_event(struct snd_soc_dapm_widget *w,
 	switch (event) {
 	case SND_SOC_DAPM_PRE_PMU:
 		if (w->shift == 5) {
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_ANALOG_RX_HPH_L_TEST, 0x04, 0x04);
+			snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_OUTPUT_VOLTAGE,0x1F, msm8x16_wcd->boost_voltage);
 			msm8x16_notifier_call(codec,
 					WCD_EVENT_PRE_HPHL_PA_ON);
 		} else if (w->shift == 4) {
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_ANALOG_RX_HPH_R_TEST, 0x04, 0x04);
+			snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_OUTPUT_VOLTAGE,0x1F, msm8x16_wcd->boost_voltage);
 			msm8x16_notifier_call(codec,
 					WCD_EVENT_PRE_HPHR_PA_ON);
 		}
@@ -3008,14 +3082,18 @@ static int msm8x16_wcd_hph_pa_event(struct snd_soc_dapm_widget *w,
 		break;
 
 	case SND_SOC_DAPM_POST_PMU:
-		usleep_range(4000, 4100);
-		if (w->shift == 5)
+		usleep_range(10000, 10100);
+		if (w->shift == 5) {
+			snd_soc_update_bits(codec,
+				MSM8X16_WCD_A_ANALOG_RX_HPH_L_TEST, 0x04, 0x04);
 			snd_soc_update_bits(codec,
 				MSM8X16_WCD_A_CDC_RX1_B6_CTL, 0x01, 0x00);
-		else if (w->shift == 4)
+		} else if (w->shift == 4) {
+			snd_soc_update_bits(codec,
+				MSM8X16_WCD_A_ANALOG_RX_HPH_R_TEST, 0x04, 0x04);
 			snd_soc_update_bits(codec,
 				MSM8X16_WCD_A_CDC_RX2_B6_CTL, 0x01, 0x00);
-		usleep_range(10000, 10100);
+		}
 		break;
 
 	case SND_SOC_DAPM_PRE_PMD:
@@ -3023,11 +3101,15 @@ static int msm8x16_wcd_hph_pa_event(struct snd_soc_dapm_widget *w,
 			snd_soc_update_bits(codec,
 				MSM8X16_WCD_A_CDC_RX1_B6_CTL, 0x01, 0x01);
 			msleep(20);
+			snd_soc_update_bits(codec,
+				MSM8X16_WCD_A_ANALOG_RX_HPH_L_TEST, 0x04, 0x00);
 			msm8x16_wcd->mute_mask |= HPHL_PA_DISABLE;
 		} else if (w->shift == 4) {
 			snd_soc_update_bits(codec,
 				MSM8X16_WCD_A_CDC_RX2_B6_CTL, 0x01, 0x01);
 			msleep(20);
+			snd_soc_update_bits(codec,
+				MSM8X16_WCD_A_ANALOG_RX_HPH_R_TEST, 0x04, 0x00);
 			msm8x16_wcd->mute_mask |= HPHR_PA_DISABLE;
 		}
 		break;
@@ -3035,16 +3117,12 @@ static int msm8x16_wcd_hph_pa_event(struct snd_soc_dapm_widget *w,
 		if (w->shift == 5) {
 			clear_bit(WCD_MBHC_HPHL_PA_OFF_ACK,
 				&msm8x16_wcd->mbhc.hph_pa_dac_state);
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_ANALOG_RX_HPH_L_TEST, 0x04, 0x00);
 
 			msm8x16_notifier_call(codec,
 					WCD_EVENT_POST_HPHL_PA_OFF);
 		} else if (w->shift == 4) {
 			clear_bit(WCD_MBHC_HPHR_PA_OFF_ACK,
 				&msm8x16_wcd->mbhc.hph_pa_dac_state);
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_ANALOG_RX_HPH_R_TEST, 0x04, 0x00);
 
 			msm8x16_notifier_call(codec,
 					WCD_EVENT_POST_HPHR_PA_OFF);
@@ -3058,6 +3136,11 @@ static int msm8x16_wcd_hph_pa_event(struct snd_soc_dapm_widget *w,
 			"%s: sleep 10 ms after %s PA disable.\n", __func__,
 			w->name);
 		usleep_range(10000, 10100);
+		if (asus_PRJ_ID == ASUS_ZE550KL || asus_PRJ_ID == ASUS_ZD550KL) {
+			snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_OUTPUT_VOLTAGE,0x1F, 0x1A);
+		} else {
+			snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_OUTPUT_VOLTAGE,0x1F, 0x1E);
+		}
 		break;
 	}
 	return 0;
@@ -3225,39 +3308,6 @@ static void msm8x16_wcd_shutdown(struct snd_pcm_substream *substream,
 	dev_dbg(dai->codec->dev,
 		"%s(): substream = %s  stream = %d\n" , __func__,
 		substream->name, substream->stream);
-}
-
-static int msm8x16_wcd_codec_enable_clock_block(struct snd_soc_codec *codec,
-						int enable)
-{
-	struct msm8916_asoc_mach_data *pdata = NULL;
-
-	pdata = snd_soc_card_get_drvdata(codec->card);
-	if (enable) {
-		snd_soc_update_bits(codec,
-			MSM8X16_WCD_A_CDC_CLK_MCLK_CTL, 0x01, 0x01);
-		snd_soc_update_bits(codec,
-			MSM8X16_WCD_A_CDC_CLK_PDM_CTL, 0x03, 0x03);
-		snd_soc_update_bits(codec,
-			MSM8X16_WCD_A_ANALOG_MASTER_BIAS_CTL, 0x30, 0x30);
-		snd_soc_update_bits(codec,
-			MSM8X16_WCD_A_DIGITAL_CDC_RST_CTL, 0x80, 0x80);
-		snd_soc_update_bits(codec,
-			MSM8X16_WCD_A_DIGITAL_CDC_TOP_CLK_CTL, 0x0C, 0x0C);
-		if (pdata->mclk_freq == 12288000)
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_CDC_TOP_CTL, 0x01, 0x00);
-		else if (pdata->mclk_freq == 9600000)
-			snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_CDC_TOP_CTL, 0x01, 0x01);
-	} else {
-		snd_soc_update_bits(codec,
-			MSM8X16_WCD_A_DIGITAL_CDC_TOP_CLK_CTL, 0x0C, 0x00);
-		snd_soc_update_bits(codec,
-				MSM8X16_WCD_A_CDC_CLK_PDM_CTL, 0x03, 0x00);
-
-	}
-	return 0;
 }
 
 int msm8x16_wcd_mclk_enable(struct snd_soc_codec *codec,
@@ -3897,7 +3947,8 @@ static const struct msm8x16_wcd_reg_mask_val
 	/* Initialize current threshold to 350MA
 	 * number of wait and run cycles to 4096
 	 */
-	{MSM8X16_WCD_A_ANALOG_RX_COM_OCP_CTL, 0xFF, 0xD1},
+	//{MSM8X16_WCD_A_ANALOG_RX_COM_OCP_CTL, 0xFF, 0xD1},
+	{MSM8X16_WCD_A_ANALOG_RX_COM_OCP_CTL, 0xFF, 0x7F},
 	{MSM8X16_WCD_A_ANALOG_RX_COM_OCP_COUNT, 0xFF, 0xFF},
 };
 
@@ -4099,15 +4150,199 @@ static void msm8x16_wcd_set_boost_v(struct snd_soc_codec *codec)
 	struct msm8x16_wcd_priv *msm8x16_wcd_priv =
 				snd_soc_codec_get_drvdata(codec);
 
-	snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_OUTPUT_VOLTAGE,
+	//asus_jeffery+++
+	if (asus_PRJ_ID == ASUS_ZD550KL) {
+		snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_OUTPUT_VOLTAGE,
+			0x1F, 0x1A);
+	} else if (asus_PRJ_ID == ASUS_ZE550KL) {
+		snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_OUTPUT_VOLTAGE,
+			0x1F, 0x1A);
+	} else {
+		snd_soc_update_bits(codec, MSM8X16_WCD_A_ANALOG_OUTPUT_VOLTAGE,
 			0x1F, msm8x16_wcd_priv->boost_voltage);
+	}
 }
+
+/* steve_chen ++ */
+#ifdef CONFIG_PROC_FS
+#define AUDIO_DEBUG_PROC_FILE "driver/audio_debug"
+#define CODEC_STATUS_PROC_FIRE "codec_status"
+static struct proc_dir_entry *audio_debug_proc_file;
+static struct proc_dir_entry *codec_status_proc_file;
+
+static mm_segment_t oldfs;
+
+static void initKernelEnv(void)
+{
+    oldfs = get_fs();
+    set_fs(KERNEL_DS);
+}
+
+static void deinitKernelEnv(void)
+{
+    set_fs(oldfs);
+}
+
+static ssize_t audio_debug_proc_write(struct file *filp, const char __user *buff, size_t len, loff_t *off)
+{
+    char messages[256];
+    memset(messages, 0, sizeof(messages));
+    printk("[Audio][Debug] audio_debug_proc_write\n");
+
+    if (len > 256)
+        len = 256;
+    if (copy_from_user(messages, buff, len))
+        return -EFAULT;
+
+    initKernelEnv();
+
+    if(strncmp(messages, "1", 1) == 0){
+        if(!g_DebugMode){
+            gpio_direction_output(g_gpio_audio_debug, 0); /* enable uart log, disable audio */
+            wcd_plug_detection_for_audio_debug(&g_msm8x16_wcd_priv->mbhc,1);
+            g_DebugMode = 1;
+        }
+        printk("[Audio][Debug] Debug mode!!\n");
+    }else if(strncmp(messages, "0", 1) == 0){
+        if(g_DebugMode){
+            gpio_direction_output(g_gpio_audio_debug, 1); /* disable uart log, enable audio */
+            g_DebugMode = 0;
+            wcd_plug_detection_for_audio_debug(&g_msm8x16_wcd_priv->mbhc,0);
+        }
+        printk("[Audio][Debug] Audio mode!!\n");
+    }else if(strncmp(messages, "write", strlen("write")) == 0){
+        unsigned int reg,value;
+        sscanf(messages + 6, "%x %x", &reg, &value);
+        snd_soc_write(registered_codec, reg, value);
+        value = snd_soc_read(registered_codec, reg);
+        printk("[Audio][codec] write register reg[0x%x]=[0x%x]\n", reg, value);
+#ifdef ASUS_FACTORY_BUILD
+    }else if(strncmp(messages, "2", 1) == 0){
+        if(!g_DebugMode){
+            wcd_disable_button_event_for_factory(&g_msm8x16_wcd_priv->mbhc,1);
+        }
+        printk("[Audio][Button]Disable Button press for test!\n");
+    }else if(strncmp(messages, "3", 1) == 0){
+        if(!g_DebugMode){
+            wcd_disable_button_event_for_factory(&g_msm8x16_wcd_priv->mbhc,0);
+        }
+        printk("[Audio][Button]Enable Button press for test!\n");
+#endif
+    }
+
+    deinitKernelEnv();
+    return len;
+}
+
+static ssize_t audio_debug_proc_read(struct file *filp, char __user *buff, size_t len, loff_t *off)
+{
+       char messages[256];
+
+       if (*off)
+               return 0;
+
+       memset(messages, 0, sizeof(messages));
+       if (len > 256)
+               len = 256;
+
+       if (g_DebugMode)
+               sprintf(messages, "Audio debug mode\n");
+       else {
+               switch (g_msm8x16_wcd_priv->mbhc.current_plug) {
+               case MBHC_PLUG_TYPE_HEADSET:
+                       sprintf(messages, "1\n");
+                       break;
+               case MBHC_PLUG_TYPE_HEADPHONE:
+                       sprintf(messages, "2\n");
+                       break;
+               case MBHC_PLUG_TYPE_HIGH_HPH:
+                       sprintf(messages, "3\n");
+                       break;
+               case MBHC_PLUG_TYPE_GND_MIC_SWAP:
+                       sprintf(messages, "4\n");
+                       break;
+               default:
+                       sprintf(messages, "0\n");
+                       break;
+               }
+       }
+
+       if (copy_to_user(buff, messages, len))
+               return -EFAULT;
+
+       (*off)++;
+       return len;
+}
+static ssize_t codec_status_proc_read(struct file *filp,char __user *buff,size_t len,loff_t *off)
+{
+	char messages[256];
+	int val;
+
+	if(*off)
+		return 0;
+
+	memset(messages,0,sizeof(messages));
+	if(len > 256)
+		len = 256;
+
+	val = snd_soc_read(registered_codec,MSM8X16_WCD_A_DIGITAL_REVISION1);
+
+	if(val < 0)
+		sprintf(messages,"0\n");
+	else
+		sprintf(messages,"1\n");
+
+	if(copy_to_user(buff,messages,len))
+		return -EFAULT;
+
+	(*off)++;
+	return len;
+}
+static struct file_operations audio_debug_proc_ops = {
+       .read = audio_debug_proc_read,
+       .write = audio_debug_proc_write,
+};
+
+static struct file_operations codec_status_proc_ops = {
+       .read = codec_status_proc_read,
+       //.write = audio_debug_proc_write,
+};
+
+static void create_audio_debug_proc_file(void)
+{
+       printk("[Audio][Debug] create_audio_debug_proc_file\n");
+       audio_debug_proc_file = proc_create(AUDIO_DEBUG_PROC_FILE, 0666, NULL, &audio_debug_proc_ops);
+
+       if (audio_debug_proc_file == NULL)
+               printk("[Audio][Debug] create_audio_debug_proc_file failed\n");
+}
+
+static void remove_audio_debug_proc_file(void)
+{
+       extern struct proc_dir_entry proc_root;
+       printk("[Audio][Debug] remove_audio_debug_proc_file\n");
+       remove_proc_entry(AUDIO_DEBUG_PROC_FILE, &proc_root);
+}
+
+static void create_codec_status_proc_file(void)
+{
+	printk("create codec status proc file\n");
+	codec_status_proc_file = proc_create(CODEC_STATUS_PROC_FIRE,0666,NULL,&codec_status_proc_ops);
+}
+static void remove_codec_status_proc_file(void)
+{
+	extern struct proc_dir_entry proc_root;
+	printk("remove codec status proc file\n");
+	remove_proc_entry(CODEC_STATUS_PROC_FIRE,&proc_root);
+}
+#endif /* #ifdef CONFIG_PROC_FS */
 
 static int msm8x16_wcd_codec_probe(struct snd_soc_codec *codec)
 {
 	struct msm8x16_wcd_priv *msm8x16_wcd_priv;
 	struct msm8x16_wcd *msm8x16_wcd;
 	int i, ret;
+	int fac_test_count = 5;
 
 	dev_dbg(codec->dev, "%s()\n", __func__);
 
@@ -4222,6 +4457,30 @@ static int msm8x16_wcd_codec_probe(struct snd_soc_codec *codec)
 		registered_codec = NULL;
 		return -ENOMEM;
 	}
+	
+	/*steve_chen ++*/
+	g_msm8x16_wcd_priv = msm8x16_wcd_priv;
+
+	ret = gpio_request(g_gpio_audio_debug,"AUDIO_DEBUG");
+	if(ret)
+		printk("%s: Failed to request gpio AUDIO_DEBUG %d\n", __func__, g_gpio_audio_debug);
+	else
+		gpio_direction_output(g_gpio_audio_debug,0);
+
+	while(fac_test_count > 0){
+		fac_test_count --;
+		fac_test_result = snd_soc_read(codec,MSM8X16_WCD_A_DIGITAL_REVISION1);
+		if(fac_test_result){
+			break;
+		}
+	}
+
+#ifdef CONFIG_PROC_FS
+	create_audio_debug_proc_file();
+	if(fac_test_result)
+		create_codec_status_proc_file();
+#endif
+	/*steve_chen --*/
 	return 0;
 }
 
@@ -4238,6 +4497,13 @@ static int msm8x16_wcd_codec_remove(struct snd_soc_codec *codec)
 	iounmap(msm8x16_wcd->dig_base);
 	kfree(msm8x16_wcd_priv->fw_data);
 	kfree(msm8x16_wcd_priv);
+	/*steve_chen ++*/
+#ifdef CONFIG_PROC_FS
+	remove_audio_debug_proc_file();
+	if(fac_test_result)
+		remove_codec_status_proc_file();
+#endif
+	/*steve_chen --*/
 
 	return 0;
 }
@@ -4500,7 +4766,7 @@ static int msm8x16_wcd_spmi_probe(struct spmi_device *spmi)
 
 	modem_state = apr_get_modem_state();
 	if (modem_state != APR_SUBSYS_LOADED) {
-		dev_dbg(&spmi->dev, "Modem is not loaded yet %d\n",
+		dev_err(&spmi->dev, "Modem is not loaded yet %d\n",
 				modem_state);
 		return -EPROBE_DEFER;
 	}

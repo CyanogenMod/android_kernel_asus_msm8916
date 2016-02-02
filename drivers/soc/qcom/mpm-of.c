@@ -600,8 +600,8 @@ static void msm_mpm_sys_low_power_modes(bool allow)
 	mutex_lock(&enable_xo_mutex);
 	if (allow) {
 		if (xo_enabled) {
-			clk_disable_unprepare(xo_clk);
 			xo_enabled = false;
+			clk_disable_unprepare(xo_clk);
 		}
 	} else {
 		if (!xo_enabled) {
@@ -609,8 +609,8 @@ static void msm_mpm_sys_low_power_modes(bool allow)
 			 * than having to deal with not being able to wakeup
 			 * from a non-monitorable interrupt
 			 */
-			BUG_ON(clk_prepare_enable(xo_clk));
 			xo_enabled = true;
+			BUG_ON(clk_prepare_enable(xo_clk));
 		}
 	}
 	mutex_unlock(&enable_xo_mutex);

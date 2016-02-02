@@ -146,6 +146,7 @@ static int qpnp_vib_set(struct qpnp_vib *vib, int on)
 	int rc;
 	u8 val;
 
+	printk("qpnp_vibrator_set %s\n",(on ? "on" : "off"));
 	if (on) {
 		if (vib->mode != QPNP_VIB_MANUAL)
 			pwm_enable(vib->pwm_info.pwm_dev);

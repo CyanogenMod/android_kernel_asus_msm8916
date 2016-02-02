@@ -31,6 +31,10 @@
 #include <linux/spinlock.h>
 #include <linux/pinctrl/consumer.h>
 
+//<asus-Hollie20150714+>
+#include <linux/wakelock.h>
+static struct wake_lock pwr_key_wake_lock;
+//<asus-Hollie20150714->
 struct gpio_button_data {
 	const struct gpio_keys_button *button;
 	struct input_dev *input;
@@ -336,6 +340,16 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 			input_event(input, type, button->code, button->value);
 	} else {
 		input_event(input, type, button->code, !!state);
+		//<asus-Hollie20150714+>
+		if(state) {
+			if ((button->code == KEY_VOLUMEUP) || (button->code == KEY_VOLUMEDOWN)) {
+				//printk("[Gpio_keys]vol_key:%x,pm sts:%x,\r\n", state, g_bResume);
+				printk("[Gpio_keys]vol_key:%x,pm sts,\r\n", state);
+				wake_lock_timeout(&pwr_key_wake_lock, 3 * HZ);
+				printk("[Gpio_keys]Wakelock 3 sec for vol_key \n");
+			}
+		}
+		//<asus-Hollie20150714->
 	}
 	input_sync(input);
 }
@@ -815,6 +829,10 @@ static int gpio_keys_probe(struct platform_device *pdev)
 	}
 
 	device_init_wakeup(&pdev->dev, wakeup);
+	//<asus-Hollie20150714+>
+	wake_lock_init(&pwr_key_wake_lock, WAKE_LOCK_SUSPEND, "pwr_key_lock");
+	printk(KERN_INFO "[Gpio_keys]Initialize a wakelock for gpio_key\r\n");
+	//<asus-Hollie20150714->
 
 	return 0;
 

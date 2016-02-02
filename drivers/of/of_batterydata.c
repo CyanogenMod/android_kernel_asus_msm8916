@@ -412,6 +412,7 @@ int of_batterydata_read_data(struct device_node *batterydata_container_node,
 
 	batt_id_kohm = of_batterydata_convert_battery_id_kohm(batt_id_uv,
 					rpull_up_kohm, vadc_vdd_uv);
+	pr_info("[BATT][BMS] batt_id_kohm=%d\n",batt_id_kohm);
 	best_node = NULL;
 	best_delta = 0;
 	best_id_kohm = 0;
@@ -423,6 +424,7 @@ int of_batterydata_read_data(struct device_node *batterydata_container_node,
 		rc = of_batterydata_read_batt_id_kohm(node,
 						"qcom,batt-id-kohm",
 						&batt_ids);
+		//pr_info("[BATT][BMS]is in of_batterydata_read_data node name=%s\n",node->name);
 		if (rc)
 			continue;
 		for (i = 0; i < batt_ids.num; i++) {
@@ -445,6 +447,7 @@ int of_batterydata_read_data(struct device_node *batterydata_container_node,
 		pr_info("%s loaded\n", battery_type);
 	else
 		pr_info("%s loaded\n", best_node->name);
+	pr_info("[BATT][BMS]%s %s loaded\n",best_node->name,battery_type);
 
 	return of_batterydata_load_battery_data(best_node,
 					best_id_kohm, batt_data);

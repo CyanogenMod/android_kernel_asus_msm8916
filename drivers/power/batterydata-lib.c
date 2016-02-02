@@ -11,6 +11,7 @@
  */
 
 #define pr_fmt(fmt)	"%s: " fmt, __func__
+#define PC_INTERPOLATE_UNDEFINE -1
 
 #include <linux/module.h>
 #include <linux/batterydata-lib.h>
@@ -248,6 +249,7 @@ int interpolate_pc(struct pc_temp_ocv_lut *pc_temp_ocv,
 	int rows = pc_temp_ocv->rows;
 	int cols = pc_temp_ocv->cols;
 
+
 	if (batt_temp < pc_temp_ocv->temp[0] * DEGC_SCALE) {
 		pr_debug("batt_temp %d < known temp range\n", batt_temp);
 		batt_temp = pc_temp_ocv->temp[0] * DEGC_SCALE;
@@ -277,6 +279,7 @@ int interpolate_pc(struct pc_temp_ocv_lut *pc_temp_ocv,
 					pc_temp_ocv->percent[i - 1],
 					pc_temp_ocv->ocv[i - 1][j],
 					ocv);
+				pr_debug("%s:pc=%d\n",__FUNCTION__,pc);
 				return pc;
 			}
 		}
@@ -286,51 +289,55 @@ int interpolate_pc(struct pc_temp_ocv_lut *pc_temp_ocv,
 	 * batt_temp is within temperature for
 	 * column j-1 and j
 	 */
+
+	// weiyu+++ swift orders of pcj & pcj-1 in linear_interpolate()
+
 	if (ocv >= pc_temp_ocv->ocv[0][j])
 		return pc_temp_ocv->percent[0];
 	if (ocv <= pc_temp_ocv->ocv[rows - 1][j - 1])
 		return pc_temp_ocv->percent[rows - 1];
 
-	pcj_minus_one = 0;
-	pcj = 0;
+	pcj = PC_INTERPOLATE_UNDEFINE;
+	pcj_minus_one = PC_INTERPOLATE_UNDEFINE;
 	for (i = 0; i < rows-1; i++) {
-		if (pcj == 0
+		if (pcj == PC_INTERPOLATE_UNDEFINE
 			&& is_between(pc_temp_ocv->ocv[i][j],
 				pc_temp_ocv->ocv[i+1][j], ocv)) {
 			pcj = linear_interpolate(
-				pc_temp_ocv->percent[i],
-				pc_temp_ocv->ocv[i][j],
 				pc_temp_ocv->percent[i + 1],
 				pc_temp_ocv->ocv[i+1][j],
+				pc_temp_ocv->percent[i],
+				pc_temp_ocv->ocv[i][j],
 				ocv);
 		}
 
-		if (pcj_minus_one == 0
+		if (pcj_minus_one == PC_INTERPOLATE_UNDEFINE
 			&& is_between(pc_temp_ocv->ocv[i][j-1],
 				pc_temp_ocv->ocv[i+1][j-1], ocv)) {
 			pcj_minus_one = linear_interpolate(
+				pc_temp_ocv->percent[i + 1],
+				pc_temp_ocv->ocv[i+1][j-1],				
 				pc_temp_ocv->percent[i],
 				pc_temp_ocv->ocv[i][j-1],
-				pc_temp_ocv->percent[i + 1],
-				pc_temp_ocv->ocv[i+1][j-1],
 				ocv);
 		}
 
-		if (pcj && pcj_minus_one) {
+		if (pcj != PC_INTERPOLATE_UNDEFINE && pcj_minus_one != PC_INTERPOLATE_UNDEFINE) {
 			pc = linear_interpolate(
 				pcj_minus_one,
 				pc_temp_ocv->temp[j-1] * DEGC_SCALE,
 				pcj,
 				pc_temp_ocv->temp[j] * DEGC_SCALE,
 				batt_temp);
+			pr_debug("%s:pc=%d, pcj=%d, pcj-1=%d\n",__FUNCTION__,pc,pcj, pcj_minus_one);
 			return pc;
 		}
 	}
 
-	if (pcj)
+	if (pcj != PC_INTERPOLATE_UNDEFINE)
 		return pcj;
 
-	if (pcj_minus_one)
+	if (pcj_minus_one != PC_INTERPOLATE_UNDEFINE)
 		return pcj_minus_one;
 
 	pr_debug("%d ocv wasn't found for temp %d in the LUT returning 100%%\n",

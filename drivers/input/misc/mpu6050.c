@@ -1824,6 +1824,8 @@ static int mpu_check_chip_type(struct mpu6050_sensor *sensor,
 			sensor->chip_type = INV_MPU6500;
 		} else if (ret == MPU6050_ID) {
 			sensor->chip_type = INV_MPU6050;
+		} else if (ret == MPU6880_ID) {
+			sensor->chip_type = INV_MPU6050;
 		} else {
 			dev_err(&client->dev,
 				"Invalid chip ID %d\n", ret);

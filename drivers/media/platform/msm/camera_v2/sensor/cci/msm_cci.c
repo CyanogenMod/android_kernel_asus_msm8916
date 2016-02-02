@@ -29,7 +29,7 @@
 #define CYCLES_PER_MICRO_SEC_DEFAULT 4915
 #define CCI_MAX_DELAY 1000000
 
-#define CCI_TIMEOUT msecs_to_jiffies(100)
+#define CCI_TIMEOUT msecs_to_jiffies(1500)
 
 /* TODO move this somewhere else */
 #define MSM_CCI_DRV_NAME "msm_cci"
@@ -219,8 +219,7 @@ static int32_t msm_cci_data_queue(struct cci_device *cci_dev,
 			cmd_size, i2c_cmd->reg_addr, i2c_cmd->reg_data);
 		delay = i2c_cmd->delay;
 		data[i++] = CCI_I2C_WRITE_CMD;
-		if (i2c_cmd->reg_addr)
-			reg_addr = i2c_cmd->reg_addr;
+		reg_addr = i2c_cmd->reg_addr;
 		/* either byte or word addr */
 		if (i2c_msg->addr_type == MSM_CAMERA_I2C_BYTE_ADDR)
 			data[i++] = reg_addr;
@@ -229,22 +228,21 @@ static int32_t msm_cci_data_queue(struct cci_device *cci_dev,
 			data[i++] = reg_addr & 0x00FF;
 		}
 		/* max of 10 data bytes */
-		do {
-			if (i2c_msg->data_type == MSM_CAMERA_I2C_BYTE_DATA) {
-				data[i++] = i2c_cmd->reg_data;
-				reg_addr++;
-			} else {
-				if ((i + 1) <= 10) {
-					data[i++] = (i2c_cmd->reg_data &
-						0xFF00) >> 8; /* MSB */
-					data[i++] = i2c_cmd->reg_data &
-						0x00FF; /* LSB */
-					reg_addr += 2;
-				} else
-					break;
-			}
-			i2c_cmd++;
-		} while (--cmd_size && !i2c_cmd->reg_addr && (i <= 10));
+		if (i2c_msg->data_type == MSM_CAMERA_I2C_BYTE_DATA) {
+			data[i++] = i2c_cmd->reg_data;
+			reg_addr++;
+		} else {
+			if ((i + 1) <= 10) {
+				data[i++] = (i2c_cmd->reg_data &
+					0xFF00) >> 8; /* MSB */
+				data[i++] = i2c_cmd->reg_data &
+					0x00FF; /* LSB */
+				reg_addr += 2;
+			} else
+				break;
+		}
+		i2c_cmd++;
+		--cmd_size;
 		data[0] |= ((i-1) << 4);
 		len = ((i-1)/4) + 1;
 		rc = msm_cci_validate_queue(cci_dev, len, master, queue);
@@ -716,6 +714,7 @@ static int32_t msm_cci_init(struct v4l2_subdev *sd,
 		}
 		return 0;
 	}
+	mutex_lock(&cci_dev->cci_master_info[master].mutex);
 	ret = msm_cci_pinctrl_init(cci_dev);
 	if (ret < 0) {
 		pr_err("%s:%d Initialization of pinctrl failed\n",
@@ -761,6 +760,7 @@ static int32_t msm_cci_init(struct v4l2_subdev *sd,
 		CCI_HW_VERSION_ADDR);
 	pr_info("%s:%d: hw_version = 0x%x\n", __func__, __LINE__,
 		cci_dev->hw_version);
+
 	cci_dev->cci_master_info[MASTER_0].reset_pending = TRUE;
 	msm_camera_io_w_mb(CCI_RESET_CMD_RMSK, cci_dev->base +
 			CCI_RESET_CMD_ADDR);
@@ -784,7 +784,7 @@ static int32_t msm_cci_init(struct v4l2_subdev *sd,
 		cci_dev->base + CCI_IRQ_CLEAR_0_ADDR);
 	msm_camera_io_w_mb(0x1, cci_dev->base + CCI_IRQ_GLOBAL_CLEAR_CMD_ADDR);
 	cci_dev->cci_state = CCI_STATE_ENABLED;
-
+	mutex_unlock(&cci_dev->cci_master_info[master].mutex);
 	return 0;
 
 reset_complete_failed:
@@ -809,6 +809,7 @@ clk_enable_failed:
 	}
 request_gpio_failed:
 	cci_dev->ref_count--;
+	mutex_unlock(&cci_dev->cci_master_info[master].mutex);
 	return rc;
 }
 

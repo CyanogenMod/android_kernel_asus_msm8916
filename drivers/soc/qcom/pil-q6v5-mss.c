@@ -63,6 +63,7 @@ static void log_modem_sfr(void)
 	pr_err("modem subsystem failure reason: %s.\n", reason);
 
 	smem_reason[0] = '\0';
+	subsys_save_reason("modem", reason);/*ASUS-BBSP Save SSR reason+*/
 	wmb();
 }
 

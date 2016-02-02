@@ -30,7 +30,12 @@
 #include "mdss_debug.h"
 
 #define XO_CLK_RATE	19200000
+//<asus-Jeffery20150702+> add for msm8939 v3 dcdc mode
+extern int asus_PRJ_ID; 
+//<asus-Jeffery20150702+> add for msm8939 v3 dcdc mode
+extern char asus_lcd_id[2];
 
+struct mdss_panel_data *g_mdss_pdata;
 static int mdss_dsi_pinctrl_set_state(struct mdss_dsi_ctrl_pdata *ctrl_pdata,
 					bool active);
 
@@ -76,6 +81,8 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 		goto end;
 	}
 
+	PANEL_FUNC;
+
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
@@ -84,10 +91,11 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 		pr_warn("%s: Panel reset failed. rc=%d\n", __func__, ret);
 		ret = 0;
 	}
-
-	if (mdss_dsi_pinctrl_set_state(ctrl_pdata, false))
-		pr_debug("reset disable: pinctrl not enabled\n");
-
+	if (((asus_lcd_id[0]!='2') && (asus_lcd_id[0]!='3')) || fb_shutdown){		//<Asus BSP Squall - keep LCD_RST_EN high>
+		if (mdss_dsi_pinctrl_set_state(ctrl_pdata, false))
+			pr_debug("reset disable: pinctrl not enabled\n");
+	}
+	
 	if (ctrl_pdata->panel_bias_vreg) {
 		pr_debug("%s: Disabling panel bias vreg. ndx = %d\n",
 		       __func__, ctrl_pdata->ndx);
@@ -104,6 +112,8 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 		 */
 		if (DSI_CORE_PM == i)
 			continue;
+		//printk(KERN_DEBUG "[Display]%s disable vreg :%d \n",
+		//	__func__,ctrl_pdata->power_data[i].num_vreg);
 		ret = msm_dss_enable_vreg(
 			ctrl_pdata->power_data[i].vreg_config,
 			ctrl_pdata->power_data[i].num_vreg, 0);
@@ -126,6 +136,7 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
+	PANEL_FUNC;
 
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
@@ -137,6 +148,8 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 		 */
 		if (DSI_CORE_PM == i)
 			continue;
+		//printk(KERN_DEBUG "[Display]%s enable vreg :%d \n",
+		//	__func__,ctrl_pdata->power_data[i].num_vreg);
 		ret = msm_dss_enable_vreg(
 			ctrl_pdata->power_data[i].vreg_config,
 			ctrl_pdata->power_data[i].num_vreg, 1);
@@ -1652,7 +1665,52 @@ static int mdss_dsi_irq_init(struct device *dev, int irq_no,
 
 	return ret;
 }
+//<asus-Jeffery20150713+>
+uint16_t ze600kl_read_cpu_id(struct platform_device *ctrl_pdev){
 
+		int rc;
+		uint32_t ze600kl_cpu_gpio1=0;
+		uint32_t ze600kl_cpu_gpio2=0;
+		uint32_t ze600kl_cpu_gpio3=0;
+		uint16_t ze600kl_cpu_id=0;
+		ze600kl_cpu_gpio1 = of_get_named_gpio(ctrl_pdev->dev.of_node,
+					"qcom,ze600kl-cpu-gpio1", 0);
+		ze600kl_cpu_gpio2 = of_get_named_gpio(ctrl_pdev->dev.of_node,
+					"qcom,ze600kl-cpu-gpio2", 0);
+		ze600kl_cpu_gpio3 = of_get_named_gpio(ctrl_pdev->dev.of_node,
+					"qcom,ze600kl-cpu-gpio3", 0);
+		//pr_err("[Jeffery] ze600kl_cpu_gpio1=%x, ze600kl_cpu_gpio2=%x, ze600kl_cpu_gpio3=%x\n",ze600kl_cpu_gpio1,ze600kl_cpu_gpio2,ze600kl_cpu_gpio3);
+		if(gpio_is_valid(ze600kl_cpu_gpio1) && gpio_is_valid(ze600kl_cpu_gpio2) && gpio_is_valid(ze600kl_cpu_gpio3)){
+				rc = gpio_request(ze600kl_cpu_gpio1,"ze600kl_cpu_gpio1");
+				if(rc){
+					pr_err("[Display] request gpio 76 failed, rc = %d\n",rc);
+					goto err_gpio_pin;
+				}
+				gpio_direction_input(ze600kl_cpu_gpio1);
+
+				rc = gpio_request(ze600kl_cpu_gpio2,"ze600kl_cpu_gpio2");
+				if(rc){
+					pr_err("[Display] request gpio 75 failed, rc = %d\n",rc);
+					goto err_gpio_pin;
+				}
+				gpio_direction_input(ze600kl_cpu_gpio2);
+
+				rc = gpio_request(ze600kl_cpu_gpio3,"ze600kl_cpu_gpio3");
+				if(rc){
+					pr_err("[Display] request gpio 24 failed, rc = %d\n",rc);
+					goto err_gpio_pin;
+				}
+				gpio_direction_input(ze600kl_cpu_gpio3);
+		}
+		ze600kl_cpu_id=(gpio_get_value(ze600kl_cpu_gpio1)<<2)|(gpio_get_value(ze600kl_cpu_gpio2)<<1)|gpio_get_value(ze600kl_cpu_gpio3);
+		//pr_err("[Jeffery] ze600kl project id = %x\n",ze600kl_cpu_id);
+		return ze600kl_cpu_id;
+err_gpio_pin:
+		ze600kl_cpu_id=0;
+		pr_err("[Display] ze600kl project id = %x\n",ze600kl_cpu_id);
+		return ze600kl_cpu_id;
+}
+//<asus-Jeffery20150713->
 int dsi_panel_device_register(struct device_node *pan_node,
 				struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
@@ -1663,7 +1721,8 @@ int dsi_panel_device_register(struct device_node *pan_node,
 	struct platform_device *ctrl_pdev = NULL;
 	const char *data;
 	struct resource *res;
-
+	uint16_t ze600kl_cpu_id=0;
+	
 	mipi  = &(pinfo->mipi);
 
 	pinfo->type =
@@ -1704,7 +1763,7 @@ int dsi_panel_device_register(struct device_node *pan_node,
 
 	pinfo->mipi.dsi_phy_db.reg_ldo_mode = of_property_read_bool(
 		ctrl_pdev->dev.of_node, "qcom,regulator-ldo-mode");
-
+	
 	data = of_get_property(ctrl_pdev->dev.of_node,
 		"qcom,platform-regulator-settings", &len);
 	if ((!data) || (len != 7)) {
@@ -1712,10 +1771,33 @@ int dsi_panel_device_register(struct device_node *pan_node,
 			__func__, __LINE__);
 		return -EINVAL;
 	}
-	for (i = 0; i < len; i++) {
-		pinfo->mipi.dsi_phy_db.regulator[i]
-			= data[i];
+	//<asus-Jeffery20150702+> add for msm8939 v3 to dcdc mode
+	switch(asus_PRJ_ID){
+		case 1: //ASUS_ZE600KL
+			ze600kl_cpu_id = ze600kl_read_cpu_id(ctrl_pdev);
+			if(ze600kl_cpu_id == 5){ //msm8939 v3
+				pinfo->mipi.dsi_phy_db.reg_ldo_mode = false;
+				pinfo->mipi.dsi_phy_db.regulator[0] = 0x03;
+				pinfo->mipi.dsi_phy_db.regulator[1] = 0x08;
+				pinfo->mipi.dsi_phy_db.regulator[2] = 0x07;
+				pinfo->mipi.dsi_phy_db.regulator[3] = 0x00;
+				pinfo->mipi.dsi_phy_db.regulator[4] = 0x20;
+				pinfo->mipi.dsi_phy_db.regulator[5] = 0x07;
+				pinfo->mipi.dsi_phy_db.regulator[6] = 0x01;
+			}else{ //msm8939 v2
+				for (i = 0; i < len; i++) {
+					pinfo->mipi.dsi_phy_db.regulator[i]	= data[i];
+				}
+			}
+			break;
+			default:
+				for (i = 0; i < len; i++) {
+					pinfo->mipi.dsi_phy_db.regulator[i]	= data[i];
+				}
+				break;
 	}
+	//<asus-Jeffery20150702-> add for msm8939 v3 to dcdc mode
+	
 
 	data = of_get_property(ctrl_pdev->dev.of_node,
 		"qcom,platform-bist-ctrl", &len);
@@ -1930,6 +2012,8 @@ int dsi_panel_device_register(struct device_node *pan_node,
 		mdss_debug_register_io("dsi1_phy", &ctrl_pdata->phy_io);
 		ctrl_pdata->ndx = 1;
 	}
+
+	g_mdss_pdata = &(ctrl_pdata->panel_data);//ASUS_BSP: Wigman +++
 
 	pr_debug("%s: Panel data initialized\n", __func__);
 	return 0;

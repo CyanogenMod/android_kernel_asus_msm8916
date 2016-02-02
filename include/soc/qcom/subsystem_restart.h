@@ -105,7 +105,14 @@ extern void subsys_set_crash_status(struct subsys_device *dev, bool crashed);
 extern bool subsys_get_crash_status(struct subsys_device *dev);
 void notify_proxy_vote(struct device *device);
 void notify_proxy_unvote(struct device *device);
+extern void subsys_save_reason(char *name, char *reason);/*ASUS-BBSP Save SSR reason+*/
 #else
+/*ASUS-BBSP Save SSR reason+++*/
+static inline void subsys_save_reason(char *name, char *reason)
+{
+	return;
+}
+/*ASUS-BBSP Save SSR reason---*/
 
 static inline int subsys_get_restart_level(struct subsys_device *dev)
 {

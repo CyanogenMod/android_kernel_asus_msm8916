@@ -2275,7 +2275,7 @@ static int __init diagchar_init(void)
 	dev_t dev;
 	int error, ret;
 
-	pr_debug("diagfwd initializing ..\n");
+	printk(KERN_INFO "diagfwd initializing ..\n");
 	ret = 0;
 	driver = kzalloc(sizeof(struct diagchar_dev) + 5, GFP_KERNEL);
 	if (!driver)
@@ -2353,7 +2353,7 @@ static int __init diagchar_init(void)
 	if (ret)
 		goto fail;
 	driver->dci_state = diag_dci_init();
-	pr_debug("diagchar initializing ..\n");
+	printk(KERN_INFO "diagchar initializing ..\n");
 	driver->num = 1;
 	driver->name = ((void *)driver) + sizeof(struct diagchar_dev);
 	strlcpy(driver->name, "diag", 4);
@@ -2372,7 +2372,7 @@ static int __init diagchar_init(void)
 	if (error)
 		goto fail;
 
-	pr_debug("diagchar initialized now");
+	printk(KERN_INFO "diagchar initialized now");
 	return 0;
 
 fail:

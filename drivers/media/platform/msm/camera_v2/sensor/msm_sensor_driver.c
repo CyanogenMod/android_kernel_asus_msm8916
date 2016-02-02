@@ -18,16 +18,151 @@
 #include "msm_cci.h"
 #include "msm_camera_dt_util.h"
 
+//panpan++
+#include <linux/i2c.h>
+#include <linux/input.h>
+#include <linux/input/mt.h>
+#include <linux/slab.h>
+#include <linux/interrupt.h>
+#include <linux/delay.h>
+#include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
+#include <linux/regulator/consumer.h>
+#include <linux/firmware.h>
+#include <linux/debugfs.h>
+#include <linux/mutex.h>
+#include <linux/wait.h>
+#include <linux/time.h>
+#include <linux/workqueue.h>
+#include <linux/input/ft5x06_ts.h>
+#include <linux/fs.h>
+#include <asm/uaccess.h>
+#include <linux/fs.h>
+#include <linux/device.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+//panpan--
+
 /* Logging macro */
 #undef CDBG
-#define CDBG(fmt, args...) pr_debug(fmt, ##args)
+#define CDBG(fmt, args...) pr_err(fmt, ##args)
 
 #define SENSOR_MAX_MOUNTANGLE (360)
+#define OTP_DATA_LEN_WORD (16)
+#define OTP_DATA_LEN_BYTE (32)
+
 
 static struct v4l2_file_operations msm_sensor_v4l2_subdev_fops;
 
 /* Static declaration */
 static struct msm_sensor_ctrl_t *g_sctrl[MAX_CAMERAS];
+
+//panpan++
+unsigned char g_camera_status = 0;
+unsigned char g_vga_status = 0;
+int g_camera_id = MAX_CAMERAS;
+uint16_t sensorid0,sensorid1;
+//panpan--
+
+//panpan++
+static void create_rear_proc_file(void);
+static void create_front_proc_file(void);
+static int rear_proc_read(struct seq_file *buf, void *v);
+static int front_proc_read(struct seq_file *buf, void *v);
+static void remove_file(void);
+
+static void create_rear_bank1_proc_file(void);
+static void create_front_bank1_proc_file(void);
+static int rear_bank1_proc_read(struct seq_file *buf, void *v);
+static int front_bank1_proc_read(struct seq_file *buf, void *v);
+static void remove_bank1_file(void);
+
+
+static void create_rear_bank2_proc_file(void);
+static void create_front_bank2_proc_file(void);
+static int rear_bank2_proc_read(struct seq_file *buf, void *v);
+static int front_bank2_proc_read(struct seq_file *buf, void *v);
+static void remove_bank2_file(void);
+
+static void create_rear_bank3_proc_file(void);
+static void create_front_bank3_proc_file(void);
+static int rear_bank3_proc_read(struct seq_file *buf, void *v);
+static int front_bank3_proc_read(struct seq_file *buf, void *v);
+static void remove_bank3_file(void);
+
+static void create_rear_module_proc_file(void);
+static void create_front_module_proc_file(void);
+static int rear_module_proc_read(struct seq_file *buf, void *v);
+static int front_module_proc_read(struct seq_file *buf, void *v);
+static void remove_module_file(void);
+
+
+//panpan--
+
+
+//panpan ++
+static  ssize_t front_status_proc_read(struct device *dev,
+				struct device_attribute *attr, char *buf);
+static  ssize_t front_resolution_read(struct device *dev, 
+					struct device_attribute *attr, char *buf);
+
+static  ssize_t rear_status_proc_read(struct device *dev,
+					struct device_attribute *attr, char *buf);
+static  ssize_t rear_resolution_read(struct device *dev,
+					struct device_attribute *attr, char *buf);
+
+
+
+
+static DEVICE_ATTR(camera_status, S_IRUGO|S_IWUSR, rear_status_proc_read,NULL);
+static DEVICE_ATTR(vga_status,S_IRUGO|S_IWUSR, front_status_proc_read,NULL);
+static DEVICE_ATTR(camera_resolution, S_IRUGO|S_IWUSR, rear_resolution_read,NULL);
+static DEVICE_ATTR(vga_resolution,S_IRUGO|S_IWUSR,  front_resolution_read,NULL);
+
+
+
+static int create_rear_status_proc_file(void);
+static int create_front_status_proc_file(void);
+static int create_rear_resolution_proc_file(void);
+static int create_front_resolution_proc_file(void);
+
+static void remove_proc_file(void);
+static void remove_resolution_file(void);
+
+static struct kobject *camera_kobj_camera;
+static struct kobject *camera_kobj_vga;
+static struct kobject *camera_resolution_camera;
+static struct kobject *camera_resolution_vga;
+
+
+//panpan--
+
+//Add for DIT request++
+u8 front_otp_data[OTP_DATA_LEN_BYTE];	//store front_otp data
+u8 rear_otp_data[OTP_DATA_LEN_BYTE];	//store front_otp data
+u8 front_otp_data_bank1[OTP_DATA_LEN_BYTE];	//store front_otp bank1 data
+u8 rear_otp_data_bank1[OTP_DATA_LEN_BYTE];	//store rear_otp bank1 data
+u8 front_otp_data_bank2[OTP_DATA_LEN_BYTE];	//store front_otp bank2 data
+u8 rear_otp_data_bank2[OTP_DATA_LEN_BYTE];	//store rear_otp bank2 data
+u8 front_otp_data_bank3[OTP_DATA_LEN_BYTE];	//store front_otp bank3 data
+u8 rear_otp_data_bank3[OTP_DATA_LEN_BYTE];	//store rear_otp bank3 data
+
+struct kobject *camera_otp_kobj;	//create kobj for opt node
+static ssize_t rear_otp_proc_show_asus(struct device *dev,
+				struct device_attribute *attr, char *buf);
+static ssize_t front_otp_proc_show_asus(struct device *dev,
+				struct device_attribute *attr, char *buf);
+static DEVICE_ATTR(rear_otp, S_IRUGO|S_IWUSR, rear_otp_proc_show_asus,NULL);
+static DEVICE_ATTR(front_otp, S_IRUGO|S_IWUSR, front_otp_proc_show_asus,NULL);
+static int read_rear_otp_asus(void);
+static int mn34150_otp_read(void);
+static int read_front_otp_asus(void);
+static int read_front_otp_asus2(void);
+
+//Add for DIT request--
+
 
 static int msm_sensor_platform_remove(struct platform_device *pdev)
 {
@@ -46,6 +181,15 @@ static int msm_sensor_platform_remove(struct platform_device *pdev)
 	kfree(s_ctrl->sensor_i2c_client);
 	kfree(s_ctrl);
 	g_sctrl[pdev->id] = NULL;
+
+	remove_proc_file();	 //panpan++ 
+	remove_file();     //panpan++
+	remove_bank1_file();    //panpan++
+	remove_bank2_file();    //panpan++
+	remove_bank3_file();    //panpan++
+	remove_module_file(); //panpan++
+	remove_resolution_file(); //panpan++
+	
 
 	return 0;
 }
@@ -635,6 +779,7 @@ int32_t msm_sensor_driver_probe(void *setting,
 	struct msm_camera_slave_info        *camera_info = NULL;
 
 	unsigned long                        mount_pos = 0;
+	int otp_ret = 0;
 
 	/* Validate input parameters */
 	if (!setting) {
@@ -722,6 +867,7 @@ int32_t msm_sensor_driver_probe(void *setting,
 		CDBG("mount %d",
 			slave_info->sensor_init_params.sensor_mount_angle);
 	}
+
 
 	/* Validate camera id */
 	if (slave_info->camera_id >= MAX_CAMERAS) {
@@ -871,9 +1017,62 @@ int32_t msm_sensor_driver_probe(void *setting,
 		pr_err("%s power up failed", slave_info->sensor_name);
 		goto free_camera_info;
 	}
-
+	//panpan++
+	if(slave_info->camera_id==0)
+	sensorid0=slave_info->sensor_id_info.sensor_id;
+	else	
+	sensorid1=slave_info->sensor_id_info.sensor_id;
+	//panpan--
 	pr_err("%s probe succeeded", slave_info->sensor_name);
+	
+	//panpan++
+	if(CAMERA_0 == slave_info->camera_id){
+		g_camera_id = CAMERA_0;
+		g_camera_status = 1;
+		create_rear_status_proc_file();
+		create_rear_proc_file();
+		create_rear_bank1_proc_file();
+		create_rear_bank2_proc_file();
+		create_rear_bank3_proc_file();
+		create_rear_module_proc_file();
+		create_rear_resolution_proc_file();
+		pr_err("Create_rear_camera_proc_file\n");
+	}else if(CAMERA_1 == slave_info->camera_id){
+		g_camera_id = CAMERA_1;
+		g_vga_status = 1;
+		create_front_status_proc_file();
+		create_front_proc_file();
+		create_front_bank1_proc_file();
+		create_front_bank2_proc_file();
+		create_front_bank3_proc_file();
+		create_front_module_proc_file();
+		create_front_resolution_proc_file();
+		pr_err("Create_front_camera_proc_file\n");
+	}
+//panpan--
+	
+	//Add for ATD read camera otp+++
+	//Register sysfs hooks and get otp,after this ,stream will turn off
 
+	if(CAMERA_0 == slave_info->camera_id){
+		if( camera_otp_kobj != NULL)  otp_ret = sysfs_create_file(camera_otp_kobj, &dev_attr_rear_otp.attr);
+		if (otp_ret == 0)	pr_err("Create_rear_camera_otp_file\n");
+		if(slave_info->sensor_id_info.sensor_id==0x1c21
+			||slave_info->sensor_id_info.sensor_id==0x1481)
+			read_rear_otp_asus();
+		if(slave_info->sensor_id_info.sensor_id==0x0001)
+			mn34150_otp_read();
+	}else if(CAMERA_1 == slave_info->camera_id){
+		if( camera_otp_kobj != NULL)  otp_ret = sysfs_create_file(camera_otp_kobj, &dev_attr_front_otp.attr);
+		if (otp_ret == 0)	pr_err("Create_front_camera_otp_file\n");
+		if(slave_info->sensor_id_info.sensor_id==0x5670)
+			read_front_otp_asus();
+		if(slave_info->sensor_id_info.sensor_id==0x1c21)
+			read_front_otp_asus2();
+	}
+	//Add for ATD read camera status--
+
+	
 	/*
 	  Set probe succeeded flag to 1 so that no other camera shall
 	 * probed on this slot
@@ -1173,7 +1372,6 @@ static int32_t msm_sensor_driver_parse(struct msm_sensor_ctrl_t *s_ctrl)
 	/* Store sensor control structure in static database */
 	g_sctrl[s_ctrl->id] = s_ctrl;
 	pr_err("g_sctrl[%d] %p", s_ctrl->id, g_sctrl[s_ctrl->id]);
-
 	return rc;
 
 FREE_DT_DATA:
@@ -1220,6 +1418,7 @@ static int32_t msm_sensor_driver_platform_probe(struct platform_device *pdev)
 	/* Fill device in power info */
 	s_ctrl->sensordata->power_info.dev = &pdev->dev;
 	return rc;
+	
 FREE_S_CTRL:
 	kfree(s_ctrl);
 	return rc;
@@ -1311,6 +1510,7 @@ static int __init msm_sensor_driver_init(void)
 	CDBG("Enter");
 	rc = platform_driver_probe(&msm_sensor_platform_driver,
 		msm_sensor_driver_platform_probe);
+	camera_otp_kobj = kobject_create_and_add("camera_otp", NULL);
 	if (!rc) {
 		CDBG("probe success");
 		return rc;
@@ -1330,6 +1530,1069 @@ static void __exit msm_sensor_driver_exit(void)
 	i2c_del_driver(&msm_sensor_driver_i2c);
 	return;
 }
+
+//panpan++
+static int create_rear_status_proc_file(void)
+{
+		
+		int ret;
+			camera_kobj_camera = kobject_create_and_add("camera_status", NULL) ;
+			if (camera_kobj_camera == NULL)
+			{
+				printk("%s: subsystem_register failed\n", __func__);
+				return -ENOMEM;
+			}
+		
+			ret = sysfs_create_file(camera_kobj_camera, &dev_attr_camera_status.attr);
+			if (ret)
+			{
+				printk("%s: sysfs_create failed\n", __func__);
+				return ret;
+			}
+			return 0;
+}
+static int create_front_status_proc_file(void)
+{
+		
+		int ret;
+			camera_kobj_vga = kobject_create_and_add("vga_status", NULL) ;
+			if (camera_kobj_vga == NULL)
+			{
+				printk("%s: subsystem_register failed\n", __func__);
+				return -ENOMEM;
+			}
+		
+			ret = sysfs_create_file(camera_kobj_vga, &dev_attr_vga_status.attr);
+			if (ret)
+			{
+				printk("%s: sysfs_create failed\n", __func__);
+				return ret;
+			}
+			return 0;
+}
+
+
+static void remove_proc_file(void)
+{
+	sysfs_remove_file(camera_kobj_camera, &dev_attr_camera_status.attr);
+	kobject_del(camera_kobj_camera);
+	sysfs_remove_file(camera_kobj_vga, &dev_attr_vga_status.attr);
+	kobject_del(camera_kobj_vga);
+}
+
+static ssize_t rear_status_proc_read(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct msm_sensor_ctrl_t *s_ctrl = g_sctrl[0];
+		
+		if(g_camera_status)
+		{
+			if((msm_sensor_testi2c(s_ctrl))<0)
+			return sprintf(buf, "%s\n%s\n", "ERROR: i2c r/w test fail","Driver version:");
+			else
+    		return sprintf(buf, "%s\n%s\n%s0x%x\n", "ACK:i2c r/w test ok","Driver version:","sensor_id:",sensorid0);	
+		}
+	    else
+	   return sprintf(buf, "%s\n%s\n", "ERROR: i2c r/w test fail","Driver version:");
+		
+	pr_err("Randy read camera_0\n");   
+}
+
+static ssize_t front_status_proc_read(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+		struct msm_sensor_ctrl_t *s_ctrl = g_sctrl[1];
+		
+		if(g_vga_status)
+		{
+			if((msm_sensor_testi2c(s_ctrl))<0)
+			 return sprintf(buf, "%s\n%s\n", "ERROR: i2c r/w test fail","Driver version:");
+			else
+    		 return sprintf(buf, "%s\n%s\n%s0x%x\n", "ACK:i2c r/w test ok","Driver version:","sensor_id:",sensorid1);	
+		}
+	    else
+	   return sprintf(buf, "%s\n%s\n", "ERROR: i2c r/w test fail","Driver version:");
+		
+		pr_err("Randy read camera_1\n");
+	
+}
+
+
+//panpan--
+
+static ssize_t rear_otp_proc_show_asus(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	int i, buflen = 0;
+	for( i = 0; i < OTP_DATA_LEN_WORD * 2; i++)
+		buflen += sprintf(buf + i * 5, "0x%02X ",rear_otp_data[i]);
+	buflen += sprintf(buf + i * 5, "\n");
+	return buflen;
+}
+
+static ssize_t front_otp_proc_show_asus(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	int i, buflen = 0;
+	for( i = 0; i < OTP_DATA_LEN_WORD * 2; i++)
+		buflen += sprintf(buf + i * 5, "0x%02X ",front_otp_data[i]);
+	buflen += sprintf(buf + i * 5, "\n");
+	return buflen;
+}
+
+static int read_rear_otp_asus(void){
+	//should be called after powerup
+	struct msm_sensor_ctrl_t *s_ctrl = g_sctrl[0];
+	struct msm_camera_i2c_client *sensor_i2c_client;
+	const char *sensor_name;
+	int rc = 0,i,j;
+	//int flag = 3;	//find the otp data index
+	u16 reg_val = 0;
+	u16 mFind=0;
+	u16 mFlag=0;
+	u8 read_value[OTP_DATA_LEN_BYTE];
+	sensor_i2c_client = s_ctrl->sensor_i2c_client;
+	sensor_name = s_ctrl->sensordata->sensor_name;
+
+	//1.open stream
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+		sensor_i2c_client, 0x0100,
+		&reg_val, MSM_CAMERA_I2C_BYTE_DATA);
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+		sensor_i2c_client, 0x0100,
+		reg_val|0x0001, MSM_CAMERA_I2C_BYTE_DATA);
+	msleep(5);
+
+	//2.get access to otp, and set read mode 1xxxx101
+	
+
+	//2.1 set clk
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+		sensor_i2c_client, 0x3545,
+		&reg_val, MSM_CAMERA_I2C_BYTE_DATA);
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+		sensor_i2c_client, 0x3545,
+		(reg_val|0x0c)&0xec, MSM_CAMERA_I2C_BYTE_DATA);
+
+	//3.read otp ,it will spend one page(64 Byte) to store 24 * 8 bite
+	for ( j =2 ; j >=0; j--){
+		
+		memset(read_value,0,sizeof(read_value));
+			//3.1 set page num
+		rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+				sensor_i2c_client, 0x3502,
+				0x0000 + j, MSM_CAMERA_I2C_BYTE_DATA);
+		if (rc < 0)pr_err("select page failed\n");
+		else pr_err("select page success\n");
+		msleep(5);
+		//3.2 get access to otp, and set read mode 1xxxx101
+		rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+		sensor_i2c_client, 0x3500,
+		&reg_val, MSM_CAMERA_I2C_BYTE_DATA);
+		rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+		sensor_i2c_client, 0x3500,
+		(reg_val|0x85)&0xfd, MSM_CAMERA_I2C_BYTE_DATA);
+		msleep(5);
+		for ( i = 0;i < OTP_DATA_LEN_WORD ; i++){
+			reg_val = 0;
+
+			//3.3 read page otp data
+			rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+				sensor_i2c_client, 0x3504 + i * 2,
+				&reg_val, MSM_CAMERA_I2C_WORD_DATA);
+			read_value[i*2] = reg_val>>8;
+			read_value[i*2 +1] = reg_val&0x00ff;
+			//pr_err("i= %d, rear val = 0x%04x\n", i,reg_val);
+			
+			if(rc<0)
+			pr_err( "failed to read OTP data j:%d,i:%d\n",j,i);
+			if(reg_val != 0)
+			{
+				if(mFind==0)
+				{	
+					mFind = 1;
+					mFlag=j;
+				}	
+			}
+		}
+	
+		if(j==0)
+		memcpy(rear_otp_data_bank1, read_value, OTP_DATA_LEN_BYTE);
+		else if(j==1)
+		memcpy(rear_otp_data_bank2, read_value, OTP_DATA_LEN_BYTE);
+		else 
+		memcpy(rear_otp_data_bank3, read_value, OTP_DATA_LEN_BYTE);
+	
+	}
+	if(mFlag==2)
+		memcpy(rear_otp_data,rear_otp_data_bank3, OTP_DATA_LEN_BYTE);
+	else if(mFlag==1)
+		memcpy(rear_otp_data,rear_otp_data_bank2, OTP_DATA_LEN_BYTE);
+	else
+		memcpy(rear_otp_data,rear_otp_data_bank1, OTP_DATA_LEN_BYTE);
+	pr_err("data ok and copy to rear_otp_data\n");
+	//4.close otp access
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+			sensor_i2c_client, 0x3500,
+			&reg_val, MSM_CAMERA_I2C_BYTE_DATA);
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+			sensor_i2c_client, 0x3500,
+			reg_val&0x007f, MSM_CAMERA_I2C_BYTE_DATA);
+	if (rc < 0)pr_err("%s: %s: close otp access failed\n", __func__, sensor_name);
+
+	//5.close stream
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+		sensor_i2c_client, 0x0100,
+		&reg_val, MSM_CAMERA_I2C_BYTE_DATA);
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+		sensor_i2c_client, 0x0100,
+		reg_val|0x0000, MSM_CAMERA_I2C_BYTE_DATA);
+	if (rc < 0)pr_err("%s: %s: close stream failed\n", __func__, sensor_name);
+
+	if (rc != 0) return -1;
+	return 0;
+}
+
+// Clark_Liu add for mn34150 ++
+static u16 PLLsetting1[9][2]={
+	{ 0x300A, 0x09 },
+	{ 0x300B, 0x03 },
+	{ 0x0304, 0x00 },
+	{ 0x0305, 0x02 },
+	{ 0x0306, 0x00 },
+	{ 0x0307, 0x9C },
+	{ 0x3004, 0x01 },
+	{ 0x3005, 0xDF },
+	{ 0x3000, 0x03 },
+};
+
+static u16 PLLsetting2[3][2]={
+	{ 0x3007, 0x40 },
+	{ 0x3000, 0x43 },
+	{ 0x300A, 0x08 },
+};
+
+static int mn34150_otp_read(void)
+{
+	//should be called after powerup
+	struct msm_sensor_ctrl_t *s_ctrl = g_sctrl[0];
+	struct msm_camera_i2c_client *sensor_i2c_client;
+	const char *sensor_name;
+	int rc = 0,i,j;
+	//int flag = 3;	//find the otp data index
+	u16 reg_val = 0;
+	u16 mFind=0;
+	u16 mFlag=0;
+	u8 read_value[OTP_DATA_LEN_BYTE];
+	sensor_i2c_client = s_ctrl->sensor_i2c_client;
+	sensor_name = s_ctrl->sensordata->sensor_name;
+
+	//PLL setting 1
+	for (j=0;j<sizeof(PLLsetting1)/(2*sizeof(u16));j++) {
+		 rc = sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, PLLsetting1[j][0], PLLsetting1[j][1],MSM_CAMERA_I2C_BYTE_DATA);
+		if (rc<0) {
+			pr_err("%s: failed to write 0x%x = 0x%x\n",
+				 __func__,PLLsetting1[j][0], PLLsetting1[j][1]);
+			//return ret;
+		}
+	}
+	usleep(85);
+	//PLL setting 2
+	for (j=0;j<sizeof(PLLsetting2)/(2*sizeof(u16));j++) {
+		 rc = sensor_i2c_client->i2c_func_tbl->i2c_write(sensor_i2c_client, PLLsetting2[j][0], PLLsetting2[j][1],MSM_CAMERA_I2C_BYTE_DATA);
+		if (rc<0) {
+			pr_err("%s: failed to write 0x%x = 0x%x\n",
+				 __func__,PLLsetting2[j][0], PLLsetting2[j][1]);
+			//return ret;
+		}
+	}
+	usleep(1005);
+
+	for(j=2; j>=0; j--){
+
+		for (i = 0; i < OTP_DATA_LEN_BYTE; i++) {
+			reg_val=0;
+			rc = sensor_i2c_client->i2c_func_tbl->i2c_read(sensor_i2c_client, 0x3481+i+j*OTP_DATA_LEN_BYTE,&reg_val,MSM_CAMERA_I2C_BYTE_DATA);
+			if(rc<0)
+			pr_err( "failed to read OTP data j:%d,i:%d\n",j,i);
+			read_value[i]=reg_val&0xff;
+			pr_err("i= %d, rear val = 0x%02x\n", i,reg_val);
+			if(reg_val!= 0)
+			{
+				if(mFind==0)
+				{	
+					mFind = 1;
+					mFlag=j;
+				}	
+			}
+			
+		}
+
+		if(j==0)
+		memcpy(rear_otp_data_bank1, read_value, OTP_DATA_LEN_BYTE);
+		else if(j==1)
+		memcpy(rear_otp_data_bank2, read_value, OTP_DATA_LEN_BYTE);
+		else 
+		memcpy(rear_otp_data_bank3, read_value, OTP_DATA_LEN_BYTE);
+
+	}
+
+	if(mFlag==2)
+		memcpy(rear_otp_data,rear_otp_data_bank3, OTP_DATA_LEN_BYTE);
+	else if(mFlag==1)
+		memcpy(rear_otp_data,rear_otp_data_bank2, OTP_DATA_LEN_BYTE);
+	else
+		memcpy(rear_otp_data,rear_otp_data_bank1, OTP_DATA_LEN_BYTE);
+
+	pr_err("data ok and copy to rear_otp_data\n");
+
+	if (rc != 0) return -1;
+	return 0;
+
+
+}
+
+// Clark_Liu add for mn34150 --
+
+static int read_front_otp_asus2(void){
+	//should be called after powerup
+	struct msm_sensor_ctrl_t *s_ctrl = g_sctrl[0];
+	struct msm_camera_i2c_client *sensor_i2c_client;
+	const char *sensor_name;
+	int rc = 0,i,j;
+	//int flag = 3;	//find the otp data index
+	u16 reg_val = 0;
+	u16 mFind=0;
+	u16 mFlag=0;
+	u8 read_value[OTP_DATA_LEN_BYTE];
+	sensor_i2c_client = s_ctrl->sensor_i2c_client;
+	sensor_name = s_ctrl->sensordata->sensor_name;
+
+	//1.open stream
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+		sensor_i2c_client, 0x0100,
+		&reg_val, MSM_CAMERA_I2C_BYTE_DATA);
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+		sensor_i2c_client, 0x0100,
+		reg_val|0x0001, MSM_CAMERA_I2C_BYTE_DATA);
+	msleep(5);
+
+	//2.get access to otp, and set read mode 1xxxx101
+
+
+	//2.1 set clk
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+		sensor_i2c_client, 0x3545,
+		&reg_val, MSM_CAMERA_I2C_BYTE_DATA);
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+		sensor_i2c_client, 0x3545,
+		(reg_val|0x0c)&0xec, MSM_CAMERA_I2C_BYTE_DATA);
+
+	//3.read otp ,it will spend one page(64 Byte) to store 24 * 8 bite
+	for ( j =2 ; j >=0; j--){
+
+		memset(read_value,0,sizeof(read_value));
+			//3.1 set page num
+		rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+				sensor_i2c_client, 0x3502,
+				0x0000 + j, MSM_CAMERA_I2C_BYTE_DATA);
+		if (rc < 0)pr_err("select page failed\n");
+		else pr_err("select page success\n");
+		msleep(5);
+		//3.2 get access to otp, and set read mode 1xxxx101
+		rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+		sensor_i2c_client, 0x3500,
+		&reg_val, MSM_CAMERA_I2C_BYTE_DATA);
+		rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+		sensor_i2c_client, 0x3500,
+		(reg_val|0x85)&0xfd, MSM_CAMERA_I2C_BYTE_DATA);
+		msleep(5);
+		for ( i = 0;i < OTP_DATA_LEN_WORD ; i++){
+			reg_val = 0;
+
+			//3.3 read page otp data
+			rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+				sensor_i2c_client, 0x3504 + i * 2,
+				&reg_val, MSM_CAMERA_I2C_WORD_DATA);
+			read_value[i*2] = reg_val>>8;
+			read_value[i*2 +1] = reg_val&0x00ff;
+			pr_err("i= %d, rear val = 0x%04x\n", i,reg_val);
+
+			if(rc<0)
+			pr_err( "failed to read OTP data j:%d,i:%d\n",j,i);
+			if(reg_val != 0)
+			{
+				if(mFind==0)
+				{
+					mFind = 1;
+					mFlag=j;
+				}
+			}
+		}
+
+        if(j==0)
+            memcpy(front_otp_data_bank1, read_value, OTP_DATA_LEN_BYTE);
+        else if(j==1)
+            memcpy(front_otp_data_bank2, read_value, OTP_DATA_LEN_BYTE);
+        else
+            memcpy(front_otp_data_bank3, read_value, OTP_DATA_LEN_BYTE);
+
+	}
+    if(mFlag==2)
+        memcpy(front_otp_data, front_otp_data_bank3, OTP_DATA_LEN_BYTE);
+    else if(mFlag==1)
+        memcpy(front_otp_data, front_otp_data_bank2, OTP_DATA_LEN_BYTE);
+    else
+        memcpy(front_otp_data, front_otp_data_bank1, OTP_DATA_LEN_BYTE);
+    pr_err("data ok and copy to front_otp_data\n");
+	//4.close otp access
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+			sensor_i2c_client, 0x3500,
+			&reg_val, MSM_CAMERA_I2C_BYTE_DATA);
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+			sensor_i2c_client, 0x3500,
+			reg_val&0x007f, MSM_CAMERA_I2C_BYTE_DATA);
+	if (rc < 0)pr_err("%s: %s: close otp access failed\n", __func__, sensor_name);
+
+	//5.close stream
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+		sensor_i2c_client, 0x0100,
+		&reg_val, MSM_CAMERA_I2C_BYTE_DATA);
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+		sensor_i2c_client, 0x0100,
+		reg_val|0x0000, MSM_CAMERA_I2C_BYTE_DATA);
+	if (rc < 0)pr_err("%s: %s: close stream failed\n", __func__, sensor_name);
+
+	if (rc != 0) return -1;
+	return 0;
+}
+
+static int read_front_otp_asus(void){
+	//should be called after powerup
+	struct msm_sensor_ctrl_t *s_ctrl = g_sctrl[1];
+	struct msm_camera_i2c_client *sensor_i2c_client;
+
+	int start_addr, end_addr;
+	u8 read_value[OTP_DATA_LEN_BYTE];
+	//u16 bZero = 1;
+	u16 mFind = 0;
+	u16 mFlag=0; 
+	const char *sensor_name;
+	int rc = 0,i,j;
+	u16 reg_val = 0;
+
+	sensor_i2c_client = s_ctrl->sensor_i2c_client;
+	sensor_name = s_ctrl->sensordata->sensor_name;
+	//open stream
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+		sensor_i2c_client, 0x0100,
+		0x01, MSM_CAMERA_I2C_BYTE_DATA);
+	//open otp
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+		sensor_i2c_client, 0x5002,
+		&reg_val, MSM_CAMERA_I2C_BYTE_DATA);
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+		sensor_i2c_client, 0x5002,
+		((0x00&0x02) | (reg_val&(~0x02))), MSM_CAMERA_I2C_BYTE_DATA);
+
+	for(i = 2; i >= 0; i--)
+	{
+		if(i == 0){
+			start_addr = 0x7010;
+			end_addr   = 0x702f;
+		}else if(i == 1){
+			start_addr = 0x7030;
+			end_addr   = 0x704f;
+		}else if(i == 2){
+			start_addr = 0x7050;
+			end_addr   = 0x706f;
+		}
+		memset(read_value,0,sizeof(read_value));
+
+		rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+			sensor_i2c_client, 0x3d84,
+			0xc0, MSM_CAMERA_I2C_BYTE_DATA);
+		//partial mode OTP write start address
+		rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+			sensor_i2c_client, 0x3d88,
+			(start_addr >> 8)&0xff, MSM_CAMERA_I2C_BYTE_DATA);
+		rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+			sensor_i2c_client, 0x3d89,
+			start_addr &0xff, MSM_CAMERA_I2C_BYTE_DATA);
+		// partial mode OTP write end address
+		rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+			sensor_i2c_client, 0x3d8a,
+			(end_addr >> 8) & 0xff, MSM_CAMERA_I2C_BYTE_DATA);
+		rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+			sensor_i2c_client, 0x3d8b,
+			end_addr & 0xff, MSM_CAMERA_I2C_BYTE_DATA);
+		// read otp into buffer
+		rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+			sensor_i2c_client, 0x3d81,
+			0x01, MSM_CAMERA_I2C_BYTE_DATA);
+
+		msleep(5);
+		for(j = 0; j < OTP_DATA_LEN_WORD; j++)
+		{
+			reg_val = 0;
+			rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+				sensor_i2c_client, start_addr + j * 2,
+				&reg_val, MSM_CAMERA_I2C_WORD_DATA);
+			read_value[j*2] = reg_val>>8;
+			read_value[j*2 +1] = reg_val&0x00ff;
+			//pr_err("j= %d, front val = 0x%04x\n", j,reg_val);
+			if(rc<0)
+			{
+				pr_err( "failed to read OTP data i:%d,j:%d\n",i,j);
+				continue;
+			}
+			if(reg_val != 0)
+			{
+				if(mFind==0)
+				{	
+					mFind = 1;
+					mFlag=i;
+				}	
+			}
+		}
+
+		if(i==2)
+			memcpy(front_otp_data_bank3, read_value, OTP_DATA_LEN_BYTE);
+		else if(i==1)
+			memcpy(front_otp_data_bank2, read_value, OTP_DATA_LEN_BYTE);
+		else
+			memcpy(front_otp_data_bank1, read_value, OTP_DATA_LEN_BYTE);
+	}
+
+	if(mFlag==2)
+		memcpy(front_otp_data,front_otp_data_bank3, OTP_DATA_LEN_BYTE);
+	else if(mFlag==1)
+		memcpy(front_otp_data,front_otp_data_bank2, OTP_DATA_LEN_BYTE);
+	else
+		memcpy(front_otp_data,front_otp_data_bank1, OTP_DATA_LEN_BYTE);
+	pr_err("data ok and copy to front_otp_data\n");
+
+	//set 0x5002[1] to close otp
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+		sensor_i2c_client, 0x5002,
+		&reg_val, MSM_CAMERA_I2C_BYTE_DATA);
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+		sensor_i2c_client, 0x5002,
+		(0x02 & 0x02) | (reg_val & (~0x02)), MSM_CAMERA_I2C_BYTE_DATA);
+	//close stream
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_write(
+		sensor_i2c_client, 0x0100,
+		0x00, MSM_CAMERA_I2C_BYTE_DATA);
+	return mFind;
+	}
+
+
+//panpan ++
+
+#define	STATUS_REAR_PROC_FILE	"driver/rear_otp"
+#define	STATUS_FRONT_PROC_FILE	"driver/front_otp"
+#define	STATUS_BANK1_REAR_PROC_FILE	"driver/rear_otp_bank1"
+#define	STATUS_BANK1_FRONT_PROC_FILE	"driver/front_otp_bank1"
+#define	STATUS_BANK2_REAR_PROC_FILE	"driver/rear_otp_bank2"
+#define	STATUS_BANK2_FRONT_PROC_FILE	"driver/front_otp_bank2"
+#define	STATUS_BANK3_REAR_PROC_FILE	"driver/rear_otp_bank3"
+#define	STATUS_BANK3_FRONT_PROC_FILE	"driver/front_otp_bank3"
+#define	REARMODULE_PROC_FILE	"driver/RearModule"
+#define	FRONTMODULE_PROC_FILE	"driver/FrontModule"
+
+
+
+static struct proc_dir_entry *status_proc_file;
+
+static int rear_proc_read(struct seq_file *buf, void *v)
+{	
+	int i;
+	for( i = 0; i < OTP_DATA_LEN_WORD * 2; i++)
+	{
+		seq_printf(buf, "0x%02X ",rear_otp_data[i]);
+		if(i==7||i==15||i==23||i==31)
+		seq_printf(buf ,"\n");
+	}
+	return 0;
+}
+
+static int front_proc_read(struct seq_file *buf, void *v)
+{
+	int i;
+	for( i = 0; i < OTP_DATA_LEN_WORD * 2; i++)
+	{
+		seq_printf(buf, "0x%02X ",front_otp_data[i]);
+		if(i==7||i==15||i==23||i==31)
+		seq_printf(buf ,"\n");
+	}
+	return 0;
+}
+
+static int rear_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, rear_proc_read, NULL);
+}
+
+static int front_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, front_proc_read, NULL);
+}
+
+static const struct file_operations rear_status_fops = {
+	.owner = THIS_MODULE,
+	.open = rear_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static const struct file_operations front_status_fops = {
+	.owner = THIS_MODULE,
+	.open = front_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static void create_rear_proc_file(void)
+{
+     
+        status_proc_file = proc_create(STATUS_REAR_PROC_FILE, 0666, NULL, &rear_status_fops);
+		if(status_proc_file) {
+			CDBG("%s sucessed!\n", __func__);
+	    } else {
+			pr_err("%s failed!\n", __func__);
+	    }   
+}
+
+static void create_front_proc_file(void)
+{
+		status_proc_file = proc_create(STATUS_FRONT_PROC_FILE, 0666, NULL, &front_status_fops);
+	
+	if(status_proc_file) {
+		CDBG("%s sucessed!\n", __func__);
+    } else {
+		pr_err("%s failed!\n", __func__);
+    }
+}
+
+static void remove_file(void)
+{
+    extern struct proc_dir_entry proc_root;
+    pr_info("remove_file\n");	
+    remove_proc_entry(STATUS_REAR_PROC_FILE, &proc_root);
+	remove_proc_entry(STATUS_FRONT_PROC_FILE, &proc_root);
+}
+
+
+
+
+
+
+
+static int rear_bank1_proc_read(struct seq_file *buf, void *v)
+{	
+	int i;
+	for( i = 0; i < OTP_DATA_LEN_WORD * 2; i++)
+	{
+		seq_printf(buf, "0x%02X ",rear_otp_data_bank1[i]);
+		if(i==7||i==15||i==23||i==31)
+		seq_printf(buf ,"\n");
+	}
+	return 0;
+}
+
+static int front_bank1_proc_read(struct seq_file *buf, void *v)
+{
+	int i;
+	for( i = 0; i < OTP_DATA_LEN_WORD * 2; i++)
+	{
+		seq_printf(buf, "0x%02X ",front_otp_data_bank1[i]);
+		if(i==7||i==15||i==23||i==31)
+		seq_printf(buf ,"\n");
+	}
+	return 0;
+}
+
+static int rear_bank1_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, rear_bank1_proc_read, NULL);
+}
+
+static int front_bank1_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, front_bank1_proc_read, NULL);
+}
+
+static const struct file_operations rear_status_fops_bank1 = {
+	.owner = THIS_MODULE,
+	.open = rear_bank1_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static const struct file_operations front_status_fops_bank1 = {
+	.owner = THIS_MODULE,
+	.open = front_bank1_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static void create_rear_bank1_proc_file(void)
+{
+     
+        status_proc_file = proc_create(STATUS_BANK1_REAR_PROC_FILE, 0666, NULL, &rear_status_fops_bank1);
+		if(status_proc_file) {
+			CDBG("%s sucessed!\n", __func__);
+	    } else {
+			pr_err("%s failed!\n", __func__);
+	    }   
+}
+
+static void create_front_bank1_proc_file(void)
+{
+		status_proc_file = proc_create(STATUS_BANK1_FRONT_PROC_FILE, 0666, NULL, &front_status_fops_bank1);
+	
+	if(status_proc_file) {
+		CDBG("%s sucessed!\n", __func__);
+    } else {
+		pr_err("%s failed!\n", __func__);
+    }
+}
+
+static void remove_bank1_file(void)
+{
+    extern struct proc_dir_entry proc_root;
+    pr_info("remove_bank1_file\n");	
+    remove_proc_entry(STATUS_BANK1_REAR_PROC_FILE, &proc_root);
+	remove_proc_entry(STATUS_BANK1_FRONT_PROC_FILE, &proc_root);
+}
+
+
+
+static int rear_bank2_proc_read(struct seq_file *buf, void *v)
+{	
+	int i;
+	for( i = 0; i < OTP_DATA_LEN_WORD * 2; i++)
+	{
+		seq_printf(buf, "0x%02X ",rear_otp_data_bank2[i]);
+		if(i==7||i==15||i==23||i==31)
+		seq_printf(buf ,"\n");
+	}
+	return 0;
+}
+
+static int front_bank2_proc_read(struct seq_file *buf, void *v)
+{
+	int i;
+	for( i = 0; i < OTP_DATA_LEN_WORD * 2; i++)
+	{
+		seq_printf(buf, "0x%02X ",front_otp_data_bank2[i]);
+		if(i==7||i==15||i==23||i==31)
+		seq_printf(buf ,"\n");
+	}
+	return 0;
+}
+
+static int rear_bank2_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, rear_bank2_proc_read, NULL);
+}
+
+static int front_bank2_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, front_bank2_proc_read, NULL);
+}
+
+static const struct file_operations rear_status_fops_bank2 = {
+	.owner = THIS_MODULE,
+	.open = rear_bank2_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static const struct file_operations front_status_fops_bank2 = {
+	.owner = THIS_MODULE,
+	.open = front_bank2_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static void create_rear_bank2_proc_file(void)
+{
+     
+        status_proc_file = proc_create(STATUS_BANK2_REAR_PROC_FILE, 0666, NULL, &rear_status_fops_bank2);
+		if(status_proc_file) {
+			CDBG("%s sucessed!\n", __func__);
+	    } else {
+			pr_err("%s failed!\n", __func__);
+	    }   
+}
+
+static void create_front_bank2_proc_file(void)
+{
+		status_proc_file = proc_create(STATUS_BANK2_FRONT_PROC_FILE, 0666, NULL, &front_status_fops_bank2);
+	
+	if(status_proc_file) {
+		CDBG("%s sucessed!\n", __func__);
+    } else {
+		pr_err("%s failed!\n", __func__);
+    }
+}
+
+static void remove_bank2_file(void)
+{
+    extern struct proc_dir_entry proc_root;
+    pr_info("remove_bank2_file\n");	
+    remove_proc_entry(STATUS_BANK2_REAR_PROC_FILE, &proc_root);
+	remove_proc_entry(STATUS_BANK2_FRONT_PROC_FILE, &proc_root);
+}
+
+
+static int rear_bank3_proc_read(struct seq_file *buf, void *v)
+{	
+	int i;
+	for( i = 0; i < OTP_DATA_LEN_WORD * 2; i++)
+	{
+		seq_printf(buf, "0x%02X ",rear_otp_data_bank3[i]);
+		if(i==7||i==15||i==23||i==31)
+		seq_printf(buf ,"\n");
+	}
+	return 0;
+}
+
+static int front_bank3_proc_read(struct seq_file *buf, void *v)
+{
+	int i;
+	for( i = 0; i < OTP_DATA_LEN_WORD * 2; i++)
+	{
+		seq_printf(buf, "0x%02X ",front_otp_data_bank3[i]);
+		if(i==7||i==15||i==23||i==31)
+		seq_printf(buf ,"\n");
+	}
+	return 0;
+}
+
+static int rear_bank3_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, rear_bank3_proc_read, NULL);
+}
+
+static int front_bank3_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, front_bank3_proc_read, NULL);
+}
+
+static const struct file_operations rear_status_fops_bank3 = {
+	.owner = THIS_MODULE,
+	.open = rear_bank3_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static const struct file_operations front_status_fops_bank3 = {
+	.owner = THIS_MODULE,
+	.open = front_bank3_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static void create_rear_bank3_proc_file(void)
+{
+     
+        status_proc_file = proc_create(STATUS_BANK3_REAR_PROC_FILE, 0666, NULL, &rear_status_fops_bank3);
+		if(status_proc_file) {
+			CDBG("%s sucessed!\n", __func__);
+	    } else {
+			pr_err("%s failed!\n", __func__);
+	    }   
+}
+
+static void create_front_bank3_proc_file(void)
+{
+		status_proc_file = proc_create(STATUS_BANK3_FRONT_PROC_FILE, 0666, NULL, &front_status_fops_bank3);
+	
+	if(status_proc_file) {
+		CDBG("%s sucessed!\n", __func__);
+    } else {
+		pr_err("%s failed!\n", __func__);
+    }
+}
+
+static void remove_bank3_file(void)
+{
+    extern struct proc_dir_entry proc_root;
+    pr_info("remove_bank3_file\n");	
+    remove_proc_entry(STATUS_BANK3_REAR_PROC_FILE, &proc_root);
+	remove_proc_entry(STATUS_BANK3_FRONT_PROC_FILE, &proc_root);
+}
+
+
+
+static int rear_module_proc_read(struct seq_file *buf, void *v)
+{	
+	if(sensorid0==0x1c21)
+	return seq_printf(buf,"T4K37\n");
+	if(sensorid0==0x1481)
+	return seq_printf(buf,"T4K35\n");
+	if(sensorid0==0x0001)
+	return seq_printf(buf,"MN34150\n");
+	return 0;
+}
+
+static int front_module_proc_read(struct seq_file *buf, void *v)
+{
+	if(sensorid1==0x5670)
+	return seq_printf(buf,"OV5670\n");
+	if(sensorid1==0x1c21)
+	return seq_printf(buf,"T4K37F\n");
+	return 0;
+}
+
+static int rear_module_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, rear_module_proc_read, NULL);
+}
+
+static int front_module_proc_open(struct inode *inode, struct  file *file)
+{
+    return single_open(file, front_module_proc_read, NULL);
+}
+
+static const struct file_operations rear_module_fops = {
+	.owner = THIS_MODULE,
+	.open = rear_module_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static const struct file_operations front_module_fops = {
+	.owner = THIS_MODULE,
+	.open = front_module_proc_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static void create_rear_module_proc_file(void)
+{
+     
+        status_proc_file = proc_create(REARMODULE_PROC_FILE, 0666, NULL, &rear_module_fops);
+		if(status_proc_file) {
+			CDBG("%s sucessed!\n", __func__);
+	    } else {
+			pr_err("%s failed!\n", __func__);
+	    }   
+}
+
+static void create_front_module_proc_file(void)
+{
+		status_proc_file = proc_create(FRONTMODULE_PROC_FILE, 0666, NULL, &front_module_fops);
+	
+	if(status_proc_file) {
+		CDBG("%s sucessed!\n", __func__);
+    } else {
+		pr_err("%s failed!\n", __func__);
+    }
+}
+
+static void remove_module_file(void)
+{
+    extern struct proc_dir_entry proc_root;
+    pr_info("remove_module_file\n");	
+    remove_proc_entry(REARMODULE_PROC_FILE, &proc_root);
+	remove_proc_entry(FRONTMODULE_PROC_FILE, &proc_root);
+}
+
+
+
+
+//panpan--
+
+
+
+//panpan++
+
+static int create_rear_resolution_proc_file(void)
+{
+		
+		int ret;
+			camera_resolution_camera = kobject_create_and_add("camera_resolution", NULL) ;
+			if (camera_resolution_camera == NULL)
+			{
+				printk("%s: subsystem_register failed\n", __func__);
+				return -ENOMEM;
+			}
+		
+			ret = sysfs_create_file(camera_resolution_camera, &dev_attr_camera_resolution.attr);
+			if (ret)
+			{
+				printk("%s: sysfs_create failed\n", __func__);
+				return ret;
+			}
+			return 0;
+}
+static int create_front_resolution_proc_file(void)
+{
+		
+		int ret;
+			camera_resolution_vga = kobject_create_and_add("vga_resolution", NULL) ;
+			if (camera_resolution_vga == NULL)
+			{
+				printk("%s: subsystem_register failed\n", __func__);
+				return -ENOMEM;
+			}
+		
+			ret = sysfs_create_file(camera_resolution_vga, &dev_attr_vga_resolution.attr);
+			if (ret)
+			{
+				printk("%s: sysfs_create failed\n", __func__);
+				return ret;
+			}
+			return 0;
+}
+
+
+static void remove_resolution_file(void)
+{
+	sysfs_remove_file(camera_resolution_camera, &dev_attr_camera_resolution.attr);
+	kobject_del(camera_resolution_camera);
+	sysfs_remove_file(camera_resolution_vga, &dev_attr_vga_resolution.attr);
+	kobject_del(camera_resolution_vga);
+}
+
+static ssize_t rear_resolution_read(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	if(sensorid0==0x1c21||sensorid0==0x0001)
+	return sprintf(buf,"13M\n");
+	else
+	return sprintf(buf,"8M\n");
+	pr_err("Randy read camera_0\n");   
+}
+
+static ssize_t front_resolution_read(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	
+		return sprintf(buf,"5M\n");
+		pr_err("Randy read camera_1\n");
+	
+}
+
+
+//panpan--
+
+
+
+
 
 module_init(msm_sensor_driver_init);
 module_exit(msm_sensor_driver_exit);

@@ -46,6 +46,7 @@
 #include <trace/events/power.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/trace_msm_low_power.h>
+#include "../../arch/arm/mach-msm/clock.h"
 
 #define SCLK_HZ (32768)
 #define SCM_HANDOFF_LOCK_ID "S:7"
@@ -248,16 +249,13 @@ static int cpu_power_select(struct cpuidle_device *dev,
 	if (!cpu)
 		return -EINVAL;
 
+	if (dev->states_usage[0].performance_mode)
+		return 0;
+
 	if (sleep_disabled)
 		return 0;
 
-	/*
-	 * TODO:
-	 * Assumes event happens always on Core0. Need to check for validity
-	 * of this scenario on cluster low power modes
-	 */
-	if (!dev->cpu)
-		next_event_us = (uint32_t)(ktime_to_us(get_next_event_time()));
+	next_event_us = (uint32_t)(ktime_to_us(get_next_event_time(dev->cpu)));
 
 	for (i = 0; i < cpu->nlevels; i++) {
 		struct lpm_cpu_level *level = &cpu->levels[i];
@@ -318,7 +316,7 @@ static int cpu_power_select(struct cpuidle_device *dev,
 		}
 	}
 
-	if (modified_time_us && !dev->cpu)
+	if (modified_time_us)
 		msm_pm_set_timer(modified_time_us);
 
 	return best_level;
@@ -895,6 +893,7 @@ static int lpm_suspend_enter(suspend_state_t state)
 	}
 	cpu_prepare(cluster, idx, false);
 	cluster_prepare(cluster, cpumask, idx, false);
+        clock_debug_print_enabled();
 	msm_cpu_pm_enter_sleep(cluster->cpu->levels[idx].mode, false);
 	cluster_unprepare(cluster, cpumask, idx, false);
 	cpu_unprepare(cluster, idx, false);

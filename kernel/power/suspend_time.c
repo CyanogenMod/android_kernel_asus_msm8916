@@ -73,18 +73,14 @@ late_initcall(suspend_time_debug_init);
 static int suspend_time_syscore_suspend(void)
 {
 	read_persistent_clock(&suspend_time_before);
-
 	return 0;
 }
 
 static void suspend_time_syscore_resume(void)
 {
 	struct timespec after;
-
 	read_persistent_clock(&after);
-
 	after = timespec_sub(after, suspend_time_before);
-
 	time_in_suspend_bins[fls(after.tv_sec)]++;
 
 	pr_info("Suspended for %lu.%03lu seconds\n", after.tv_sec,

@@ -3056,6 +3056,91 @@ fail_tmdev:
 	return rc;
 }
 
+#if defined(ASUS_FACTORY_BUILD)//jevian ++
+#include <linux/proc_fs.h>
+extern uint32_t socinfo_get_id(void);
+ssize_t fac_thermal_zone0_read (struct file *filp, char __user *userbuf, size_t size, loff_t *loff_p)
+{
+	int len;
+	unsigned long temp;
+	char kernelbuf[64];
+	if(socinfo_get_id() == 206)
+		msm_tsens_get_temp(0, &temp);
+	else
+		msm_tsens_get_temp(0, &temp);
+	temp *= 1000;
+	len = sprintf(kernelbuf,"%ld\n",temp);
+	return simple_read_from_buffer(userbuf, size,loff_p,kernelbuf,len);
+}
+struct file_operations fac_thermal_zone0_fops = {
+	.read=fac_thermal_zone0_read,
+};
+ssize_t fac_thermal_zone1_read (struct file *filp, char __user *userbuf, size_t size, loff_t *loff_p)
+{
+	int len;
+	unsigned long temp;
+	char kernelbuf[64];
+	if(socinfo_get_id() == 206)
+		msm_tsens_get_temp(1, &temp);
+	else
+		msm_tsens_get_temp(1, &temp);
+	temp *= 1000;
+	len = sprintf(kernelbuf,"%ld\n",temp);
+	return simple_read_from_buffer(userbuf, size,loff_p,kernelbuf,len);
+}
+struct file_operations fac_thermal_zone1_fops = {
+	.read=fac_thermal_zone1_read,
+};
+ssize_t fac_thermal_zone2_read (struct file *filp, char __user *userbuf, size_t size, loff_t *loff_p)
+{
+	int len;
+	unsigned long temp;
+	char kernelbuf[64];
+	if(socinfo_get_id() == 206)
+		msm_tsens_get_temp(2, &temp);
+	else
+		msm_tsens_get_temp(3, &temp);
+	temp *= 1000;
+	len = sprintf(kernelbuf,"%ld\n",temp);
+	return simple_read_from_buffer(userbuf, size,loff_p,kernelbuf,len);
+}
+struct file_operations fac_thermal_zone2_fops = {
+	.read=fac_thermal_zone2_read,
+};
+ssize_t fac_thermal_zone3_read (struct file *filp, char __user *userbuf, size_t size, loff_t *loff_p)
+{
+	int len;
+	unsigned long temp;
+	char kernelbuf[64];
+	if(socinfo_get_id() == 206)
+		msm_tsens_get_temp(4, &temp);
+	else
+		msm_tsens_get_temp(6, &temp);
+	temp *= 1000;
+	len = sprintf(kernelbuf,"%ld\n",temp);
+	return simple_read_from_buffer(userbuf, size,loff_p,kernelbuf,len);
+}
+struct file_operations fac_thermal_zone3_fops = {
+	.read=fac_thermal_zone3_read,
+};
+ssize_t fac_thermal_zone4_read (struct file *filp, char __user *userbuf, size_t size, loff_t *loff_p)
+{
+	int len;
+	unsigned long temp;
+	char kernelbuf[64];
+	if(socinfo_get_id() == 206)
+		msm_tsens_get_temp(5, &temp);
+	else
+		msm_tsens_get_temp(9, &temp);
+	temp *= 1000;
+	len = sprintf(kernelbuf,"%ld\n",temp);
+	return simple_read_from_buffer(userbuf, size,loff_p,kernelbuf,len);
+}
+struct file_operations fac_thermal_zone4_fops = {
+	.read=fac_thermal_zone4_read,
+};
+#endif
+
 static int tsens_tm_probe(struct platform_device *pdev)
 {
 	int rc;
@@ -3095,6 +3180,28 @@ static int tsens_tm_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, tmdev);
 
+#if defined(ASUS_FACTORY_BUILD)//jevian ++
+	if(proc_create("fac_thermal_zone0", 0777, NULL, &fac_thermal_zone0_fops)==NULL)
+	{
+		printk(KERN_ERR"create fac_thermal_zone0 inode is error\n");
+	}
+	if(proc_create("fac_thermal_zone1", 0777, NULL, &fac_thermal_zone1_fops)==NULL)
+	{
+		printk(KERN_ERR"create fac_thermal_zone1 inode is error\n");
+	}
+	if(proc_create("fac_thermal_zone2", 0777, NULL, &fac_thermal_zone2_fops)==NULL)
+	{
+		printk(KERN_ERR"create fac_thermal_zone2 inode is error\n");
+	}
+	if(proc_create("fac_thermal_zone3", 0777, NULL, &fac_thermal_zone3_fops)==NULL)
+	{
+		printk(KERN_ERR"create fac_thermal_zone3 inode is error\n");
+	}
+	if(proc_create("fac_thermal_zone4", 0777, NULL, &fac_thermal_zone4_fops)==NULL)
+	{
+		printk(KERN_ERR"create fac_thermal_zone4 inode is error\n");
+	}
+#endif
 	return 0;
 fail:
 	if (tmdev->tsens_wq)

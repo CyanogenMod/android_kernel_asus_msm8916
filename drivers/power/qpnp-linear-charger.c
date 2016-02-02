@@ -75,6 +75,7 @@
 /* BATTIF peripheral register offset */
 #define BAT_IF_PRES_STATUS_REG			0x08
 #define BATT_PRES_MASK				BIT(7)
+#define BATT_THM_PRES_MASK				BIT(1)
 #define BAT_IF_TEMP_STATUS_REG			0x09
 #define BATT_TEMP_HOT_MASK			BIT(6)
 #define BATT_TEMP_COLD_MASK			LBC_MASK(7, 6)
@@ -116,7 +117,7 @@
 #define VDD_TRIM_SUPPORTED			BIT(0)
 
 #define QPNP_CHARGER_DEV_NAME	"qcom,qpnp-linear-charger"
-
+#define FAKE_TEMPERATURE_INVAL	-999
 /* usb_interrupts */
 
 struct qpnp_lbc_irq {
@@ -366,6 +367,10 @@ struct qpnp_lbc_chip {
 	struct qpnp_adc_tm_chip		*adc_tm_dev;
 	struct led_classdev		led_cdev;
 };
+struct qpnp_lbc_chip *g_lbc_chip;
+int g_fake_battery_temperature = FAKE_TEMPERATURE_INVAL;
+//kerwin add for fast charger thermal policy
+int Thermal_Level;
 
 static void qpnp_lbc_enable_irq(struct qpnp_lbc_chip *chip,
 					struct qpnp_lbc_irq *irq)
@@ -617,6 +622,14 @@ static int qpnp_lbc_is_usb_chg_plugged_in(struct qpnp_lbc_chip *chip)
 
 	return (usbin_valid_rt_sts & USB_IN_VALID_MASK) ? 1 : 0;
 }
+
+int is_usb_chg_plugged_in(void)
+{
+	int rc;
+	rc = qpnp_lbc_is_usb_chg_plugged_in(g_lbc_chip);
+	return rc;
+}
+EXPORT_SYMBOL_GPL(is_usb_chg_plugged_in);
 
 static int qpnp_lbc_charger_enable(struct qpnp_lbc_chip *chip, int reason,
 					int enable)
@@ -1100,7 +1113,29 @@ static int get_prop_batt_present(struct qpnp_lbc_chip *chip)
 
 	return (reg_val & BATT_PRES_MASK) ? 1 : 0;
 }
+static int get_prop_batt_therm_present(struct qpnp_lbc_chip *chip)
+{
+	u8 reg_val;
+	int rc;
 
+	rc = qpnp_lbc_read(chip, chip->bat_if_base + BAT_IF_PRES_STATUS_REG,
+				&reg_val, 1);
+	if (rc) {
+		pr_err("Failed to read battery status read failed rc=%d\n",
+				rc);
+		return 0;
+	}
+	return (reg_val & BATT_THM_PRES_MASK) ? 1 : 0;
+}
+
+int get_batt_therm_present(void)
+{
+	if (g_lbc_chip) {
+		return get_prop_batt_therm_present(g_lbc_chip);
+	} else{
+		return 0;
+	}
+}
 static int get_prop_batt_health(struct qpnp_lbc_chip *chip)
 {
 	u8 reg_val;
@@ -1145,26 +1180,10 @@ static int get_prop_charge_type(struct qpnp_lbc_chip *chip)
 
 	return POWER_SUPPLY_CHARGE_TYPE_NONE;
 }
-
+extern int asus_battery_update_status(void);
 static int get_prop_batt_status(struct qpnp_lbc_chip *chip)
 {
-	int rc;
-	u8 reg_val;
-
-	if (qpnp_lbc_is_usb_chg_plugged_in(chip) && chip->chg_done)
-		return POWER_SUPPLY_STATUS_FULL;
-
-	rc = qpnp_lbc_read(chip, chip->chgr_base + INT_RT_STS_REG,
-				&reg_val, 1);
-	if (rc) {
-		pr_err("Failed to read interrupt sts rc= %d\n", rc);
-		return POWER_SUPPLY_CHARGE_TYPE_NONE;
-	}
-
-	if (reg_val & FAST_CHG_ON_IRQ)
-		return POWER_SUPPLY_STATUS_CHARGING;
-
-	return POWER_SUPPLY_STATUS_DISCHARGING;
+	return asus_battery_update_status();
 }
 
 static int get_prop_current_now(struct qpnp_lbc_chip *chip)
@@ -1191,7 +1210,7 @@ static int get_prop_capacity(struct qpnp_lbc_chip *chip)
 	if (chip->fake_battery_soc >= 0)
 		return chip->fake_battery_soc;
 
-	if (chip->cfg_use_fake_battery || !get_prop_batt_present(chip))
+	if (chip->cfg_use_fake_battery)
 		return DEFAULT_CAPACITY;
 
 	if (chip->bms_psy) {
@@ -1242,13 +1261,18 @@ static int get_prop_capacity(struct qpnp_lbc_chip *chip)
 }
 
 #define DEFAULT_TEMP		250
+#define FAULT_TEMP          -130
 static int get_prop_batt_temp(struct qpnp_lbc_chip *chip)
 {
 	int rc = 0;
 	struct qpnp_vadc_result results;
 
-	if (chip->cfg_use_fake_battery || !get_prop_batt_present(chip))
-		return DEFAULT_TEMP;
+	if (g_fake_battery_temperature > FAKE_TEMPERATURE_INVAL) {
+		return g_fake_battery_temperature;
+	}
+	if (chip->cfg_use_fake_battery || !get_prop_batt_therm_present(chip)) {
+		return FAULT_TEMP;
+	}
 
 	rc = qpnp_vadc_read(chip->vadc_dev, LR_MUX1_BATT_THERM, &results);
 	if (rc) {
@@ -1257,8 +1281,9 @@ static int get_prop_batt_temp(struct qpnp_lbc_chip *chip)
 	}
 	pr_debug("get_bat_temp %d, %lld\n", results.adc_code,
 							results.physical);
-
+	
 	return (int)results.physical;
+	
 }
 
 static void qpnp_lbc_set_appropriate_current(struct qpnp_lbc_chip *chip)
@@ -1441,6 +1466,7 @@ static int qpnp_batt_property_is_writeable(struct power_supply *psy,
 					enum power_supply_property psp)
 {
 	switch (psp) {
+	case POWER_SUPPLY_PROP_TEMP:
 	case POWER_SUPPLY_PROP_STATUS:
 	case POWER_SUPPLY_PROP_CAPACITY:
 	case POWER_SUPPLY_PROP_CHARGING_ENABLED:
@@ -1479,6 +1505,7 @@ static int qpnp_batt_property_is_writeable(struct power_supply *psy,
  *    (may be from a previous soc resume)
  * b. disable charging
  */
+extern void smb358_update_aicl_work(int time);
 static int qpnp_batt_power_set_property(struct power_supply *psy,
 				enum power_supply_property psp,
 				const union power_supply_propval *val)
@@ -1527,9 +1554,14 @@ static int qpnp_batt_power_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_WARM_TEMP:
 		rc = qpnp_lbc_configure_jeita(chip, psp, val->intval);
 		break;
+	case POWER_SUPPLY_PROP_TEMP:
+		g_fake_battery_temperature = val->intval;
+		smb358_update_aicl_work(0);
+		printk("%s: set fake battery temperature: %d\n", __FUNCTION__, val->intval);
+		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		chip->fake_battery_soc = val->intval;
-		pr_debug("power supply changed batt_psy\n");
+		printk("%s: set fake battery soc: %d\n", __FUNCTION__, val->intval);
 		break;
 	case POWER_SUPPLY_PROP_CHARGING_ENABLED:
 		chip->cfg_charging_disabled = !(val->intval);
@@ -1601,6 +1633,7 @@ static int qpnp_batt_power_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_SYSTEM_TEMP_LEVEL:
 		val->intval = chip->therm_lvl_sel;
+		Thermal_Level = chip->therm_lvl_sel;
 		break;
 	default:
 		return -EINVAL;
@@ -2712,13 +2745,14 @@ static int qpnp_lbc_probe(struct spmi_device *spmi)
 		alarm_start_relative(&chip->vddtrim_alarm, kt);
 	}
 
-	pr_info("Probe chg_dis=%d bpd=%d usb=%d batt_pres=%d batt_volt=%d soc=%d\n",
+	pr_info("Probe chg_dis=%d bpd=%d usb=%d batt_pres=%d batt_volt=%d soc=%d batt_therm_pin=%d\n",
 			chip->cfg_charging_disabled,
 			chip->cfg_bpd_detection,
 			qpnp_lbc_is_usb_chg_plugged_in(chip),
 			get_prop_batt_present(chip),
 			get_prop_battery_voltage_now(chip),
-			get_prop_capacity(chip));
+			get_prop_capacity(chip),
+			get_prop_batt_therm_present(chip));
 
 	return 0;
 

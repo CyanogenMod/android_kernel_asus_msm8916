@@ -746,6 +746,7 @@ static void log_failure_reason(const struct pil_tz_data *d)
 	u32 size;
 	char *smem_reason, reason[MAX_SSR_REASON_LEN];
 	const char *name = d->subsys_desc.name;
+	char myname[32];/*ASUS-BBSP Save SSR reason+*/
 
 	if (d->smem_id == -1)
 		return;
@@ -766,6 +767,8 @@ static void log_failure_reason(const struct pil_tz_data *d)
 	pr_err("%s subsystem failure reason: %s.\n", name, reason);
 
 	smem_reason[0] = '\0';
+	strlcpy(myname, name, 32);/*ASUS-BBSP Save SSR reason+*/
+	subsys_save_reason(myname, reason);/*ASUS-BBSP Save SSR reason+*/
 	wmb();
 }
 

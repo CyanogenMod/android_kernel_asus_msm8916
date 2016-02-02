@@ -19,6 +19,7 @@
 #ifdef CONFIG_REGULATOR_CPR
 
 int __init cpr_regulator_init(void);
+void cpr_regulator_print_corner_voltage(void); //<asus-wx20150730+>
 
 #else
 

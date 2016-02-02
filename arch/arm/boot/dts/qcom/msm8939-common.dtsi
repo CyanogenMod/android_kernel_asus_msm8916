@@ -94,6 +94,14 @@
 			reg = <0x0 0x83000000 0x0 0x2000000>;
 			label = "cont_splash_mem";
 		};
+		
+		asus_debug_mem: asus_debug_region@0 {
+			linux,reserve-contiguous-region;
+			linux,reserve-region;
+			linux,remove-completely;
+			reg = <0x0 0x8fe00000 0x0 0x00200000>;
+			label = "asus_debug_mem";
+		};
 	};
 
 	soc: soc { };
@@ -793,6 +801,9 @@
 		qcom,hsusb-otg-phy-type = <2>;
 		qcom,hsusb-otg-mode = <1>;
 		qcom,hsusb-otg-otg-control = <2>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&usbid_default>;
+		qcom,usbid-gpio = <&msm_gpio 110 0>;
 		qcom,hsusb-otg-disable-reset;
 		qcom,dp-manual-pullup;
 		qcom,hsusb-otg-mpm-dpsehv-int = <49>;

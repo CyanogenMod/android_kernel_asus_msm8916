@@ -1393,5 +1393,45 @@
 				bias-pull-down;
 			};
 		};
+
+		akm_reset_pin {
+                       qcom,pins = <&gp 112>;
+                       qcom,pin-func = <0>;
+                       qcom,num-grp-pins = <1>;
+                       label = "akm_reset_pin";
+                       akm_default1: akm_default {
+                               drive-strength = <16>;
+                               bias-pull-up;
+                       };
+                       akm_sleep1: akm_sleep {
+                               drive-strength = <2>;
+                               bias-pull-down;
+                       };
+               };
+
+               cm36283_irq_pin {
+                       qcom,pins = <&gp 113>;
+                       qcom,pin-func = <0>;
+                       qcom,num-grp-pins = <1>;
+                       label = "cm36283_irq_pin";
+                       cm36283_default: cm36283_default {
+                               drive-strength = <16>;
+                               bias-pull-up;
+                       };
+               };
+
+
+               kxtj9_irq_pin {
+                       qcom,pins = <&gp 36>;
+                       qcom,pin-func = <0>;
+                       qcom,num-grp-pins = <1>;
+                       label = "kxtj9_irq_pin";
+                       kxtj9_default: kxtj9_default {
+                               drive-strength = <16>;
+                               bias-pull-down;
+                       };
+               };
+
+		
 	};
 };

@@ -3,7 +3,14 @@
 #
 
 # Each configuration option enables a list of files.
-
+ifeq ($(TARGET_PRODUCT),Z00L)
+EXTRA_CFLAGS	+= -DZE550KL_HD
+EXTRA_CFLAGS	+= -DZE600KL_HD
+endif
+ifeq ($(TARGET_PRODUCT),Z00T)
+EXTRA_CFLAGS	+= -DZE551KL_FHD
+EXTRA_CFLAGS	+= -DZE601KL_FHD
+endif
 wm97xx-ts-y := wm97xx-core.o
 
 obj-$(CONFIG_TOUCHSCREEN_88PM860X)	+= 88pm860x-ts.o
@@ -75,7 +82,9 @@ obj-$(CONFIG_TOUCHSCREEN_WM97XX_MAINSTONE)	+= mainstone-wm97xx.o
 obj-$(CONFIG_TOUCHSCREEN_WM97XX_ZYLONITE)	+= zylonite-wm97xx.o
 obj-$(CONFIG_TOUCHSCREEN_W90X900)	+= w90p910_ts.o
 obj-$(CONFIG_TOUCHSCREEN_TPS6507X)	+= tps6507x-ts.o
-obj-$(CONFIG_TOUCHSCREEN_FT5X06)	+= ft5x06_ts.o
+#obj-$(CONFIG_TOUCHSCREEN_FT5X06)	+= ft5x06_ts.o
+obj-$(CONFIG_TOUCHSCREEN_FT5X06) += ftxxxx.o 
+ftxxxx-objs += ftxxxx_ts.o ftxxxx_ex_fun.o focaltech_ctl.o ini.o test_lib.o
 obj-$(CONFIG_TOUCHSCREEN_MSTAR21XX)	+= msg21xx_ts.o
 obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_RMI4_DEV)	+= synaptics_rmi_dev.o
 obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_FW_UPDATE) 	+= synaptics_fw_update.o

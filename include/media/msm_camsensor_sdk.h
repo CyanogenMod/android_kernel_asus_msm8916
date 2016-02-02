@@ -5,7 +5,7 @@
 
 #define KVERSION 0x1
 
-#define MAX_POWER_CONFIG      12
+#define MAX_POWER_CONFIG      14
 #define GPIO_OUT_LOW          (0 << 1)
 #define GPIO_OUT_HIGH         (1 << 1)
 #define CSI_EMBED_DATA        0x12
@@ -68,6 +68,7 @@ enum msm_camera_i2c_reg_addr_type {
 	MSM_CAMERA_I2C_WORD_ADDR,
 	MSM_CAMERA_I2C_3B_ADDR,
 	MSM_CAMERA_I2C_ADDR_TYPE_MAX,
+	MSM_CAMERA_I2C_Fujitsu,
 };
 
 enum msm_camera_i2c_data_type {
@@ -91,6 +92,7 @@ enum msm_sensor_power_seq_gpio_t {
 	SENSOR_GPIO_VDIG,
 	SENSOR_GPIO_VAF,
 	SENSOR_GPIO_FL_EN,
+	SENSOR_GPIO_FL_1_EN,
 	SENSOR_GPIO_FL_NOW,
 	SENSOR_GPIO_FL_RESET,
 	SENSOR_GPIO_CUSTOM1,

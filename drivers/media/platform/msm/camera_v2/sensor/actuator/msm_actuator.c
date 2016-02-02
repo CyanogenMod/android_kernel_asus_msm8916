@@ -17,6 +17,11 @@
 #include "msm_actuator.h"
 #include "msm_cci.h"
 
+#include <linux/debugfs.h>
+#include <linux/fs.h>
+#include <linux/proc_fs.h>
+#include <linux/seq_file.h>
+
 DEFINE_MSM_MUTEX(msm_actuator_mutex);
 
 #undef CDBG
@@ -26,6 +31,10 @@ static struct v4l2_file_operations msm_actuator_v4l2_subdev_fops;
 static int32_t msm_actuator_power_up(struct msm_actuator_ctrl_t *a_ctrl);
 static int32_t msm_actuator_power_down(struct msm_actuator_ctrl_t *a_ctrl);
 
+/*For ASUS VCM+++*/
+static int16_t asus_vcm_value = 0;
+/*For ASUS VCM---*/
+struct msm_actuator_ctrl_t *vcm_ctrl; // <ASUS-Hollie20150422+>
 static struct msm_actuator msm_vcm_actuator_table;
 static struct msm_actuator msm_piezo_actuator_table;
 static struct msm_actuator msm_hvcm_actuator_table;
@@ -36,7 +45,47 @@ static struct msm_actuator *actuators[] = {
 	&msm_piezo_actuator_table,
 	&msm_hvcm_actuator_table,
 };
+// <ASUS-Hollie20150422+>
+void asus_actuator_move (int position){
+	u16 addr, value;
+	
+	if(position < 0){
+		position=0;
+	}else if(position > 1023){
+		position=1023;
+	}
+	
+	asus_vcm_value=position;
+	
+	addr=position >>4;
+	value=(position &0x0f ) <<4;
+	vcm_ctrl->i2c_client.i2c_func_tbl->i2c_write(&vcm_ctrl->i2c_client,addr,value,MSM_CAMERA_I2C_BYTE_DATA);			
+}
 
+void asus_actuator_close(void){
+
+	int value=asus_vcm_value;
+	int stride=20;
+	int stime=10;
+
+	if(value <= 0){
+		return ;
+	}
+
+	while(value>=stride){
+		value-=stride;
+		asus_actuator_move(value);
+		msleep(stime);
+	}
+
+	if(value > 5){
+		asus_actuator_move(5);
+		msleep(stime);
+	}
+	asus_actuator_move(0);
+
+}
+// <ASUS-Hollie20150422->
 static int32_t msm_actuator_piezo_set_default_focus(
 	struct msm_actuator_ctrl_t *a_ctrl,
 	struct msm_actuator_move_params_t *move_params)
@@ -265,6 +314,34 @@ static int32_t msm_actuator_piezo_move_focus(
 	CDBG("Exit\n");
 	return rc;
 }
+
+/*For ASUS VCM+++*/
+static ssize_t asus_vcm_show(struct file *dev, char *buffer, size_t count, loff_t *ppos)
+{
+	int ret;
+	char *buff;
+	int desc = 0;
+
+	buff = kmalloc(5,GFP_KERNEL);
+
+	if(!buff)
+	{
+		return -ENOMEM;
+	}
+
+	desc += sprintf(buff + desc, "%d",asus_vcm_value);
+
+	ret = simple_read_from_buffer(buffer,count,ppos,buff,desc);
+
+	kfree(buff);
+
+	return ret;
+}
+
+static const struct file_operations asus_vcm_proc_fops = {
+	.read = asus_vcm_show,
+};
+/*For ASUS VCM---*/
 
 static int32_t msm_actuator_move_focus(
 	struct msm_actuator_ctrl_t *a_ctrl,
@@ -504,7 +581,12 @@ static int32_t msm_actuator_vreg_control(struct msm_actuator_ctrl_t *a_ctrl,
 		pr_err("%s failed %d cnt %d\n", __func__, __LINE__, cnt);
 		return -EINVAL;
 	}
-
+	//++++ sean_lu@asus.com add "support laser sensor 2nd source"
+	if(g_ASUS_laserID==0){
+			printk("power vcm g_ASUS_laserID = %d",g_ASUS_laserID);
+			return 0;
+	}
+	//---- sean_lu@asus.com add "support laser sensor 2nd source"
 	for (i = 0; i < cnt; i++) {
 		rc = msm_camera_config_single_vreg(&(a_ctrl->pdev->dev),
 			&vreg_cfg->cam_vreg[i],
@@ -561,6 +643,11 @@ static int32_t msm_actuator_set_position(
 	a_ctrl->i2c_tbl_index = 0;
 	for (index = 0; index < set_pos->number_of_steps; index++) {
 		next_lens_position = set_pos->pos[index];
+
+		/*For ASUS VCM+++*/
+		//printk("\n[sean test] %s next_lens_position:%d\n",__func__,next_lens_position);
+		asus_vcm_value = next_lens_position;
+		/*For ASUS VCM---*/
 		delay = set_pos->delay[index];
 		a_ctrl->func_tbl->actuator_parse_i2c_params(a_ctrl,
 		next_lens_position, hw_params, delay);
@@ -1262,7 +1349,7 @@ static int32_t msm_actuator_platform_probe(struct platform_device *pdev)
 #endif
 	msm_actuator_t->msm_sd.sd.devnode->fops =
 		&msm_actuator_v4l2_subdev_fops;
-
+	vcm_ctrl=msm_actuator_t; // <ASUS-Hollie20150422+>
 	CDBG("Exit\n");
 	return rc;
 }
@@ -1304,6 +1391,12 @@ static int __init msm_actuator_init_module(void)
 {
 	int32_t rc = 0;
 	CDBG("Enter\n");
+
+	/*For ASUS VCM+++*/
+	proc_create_data("driver/vcm", 0666, NULL, &asus_vcm_proc_fops, NULL);
+	printk("sean test %s",__func__);
+	/*For ASUS VCM---*/
+
 	rc = platform_driver_probe(&msm_actuator_platform_driver,
 		msm_actuator_platform_probe);
 	if (!rc)

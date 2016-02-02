@@ -52,6 +52,7 @@
 #include <linux/msm_iommu_domains.h>
 
 #include "mdss_fb.h"
+#include "mdss_dsi.h"
 #include "mdss_mdp_splash_logo.h"
 
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
@@ -67,6 +68,9 @@
 #define MAX_FBI_LIST 32
 static struct fb_info *fbi_list[MAX_FBI_LIST];
 static int fbi_list_index;
+
+extern char boot_to_charger_mode[64];
+extern char asus_lcd_id[2];
 
 static u32 mdss_fb_pseudo_palette[16] = {
 	0x00000000, 0xffffffff, 0xffffffff, 0xffffffff,
@@ -700,11 +704,16 @@ static void mdss_fb_remove_sysfs(struct msm_fb_data_type *mfd)
 {
 	sysfs_remove_group(&mfd->fbi->dev->kobj, &mdss_fb_attr_group);
 }
-
+int fb_shutdown  = 0;
 static void mdss_fb_shutdown(struct platform_device *pdev)
 {
 	struct msm_fb_data_type *mfd = platform_get_drvdata(pdev);
+	/* ASUS_BSP: Louis ++	*/
+	struct task_struct *task = current->group_leader;
 
+	pr_info("[Display] %s: fb%d from %s \n", __func__, mfd->index, task->comm);
+	/* ASUS_BSP: Louis --	*/
+	fb_shutdown = 1;
 	mfd->shutdown_pending = true;
 	lock_fb_info(mfd->fbi);
 	mdss_fb_release_all(mfd->fbi, true);
@@ -1084,6 +1093,7 @@ static void mdss_fb_scale_bl(struct msm_fb_data_type *mfd, u32 *bl_lvl)
 void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 {
 	struct mdss_panel_data *pdata;
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	u32 temp = bkl_lvl;
 	bool bl_notify_needed = false;
 
@@ -1097,6 +1107,16 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	if ((((mdss_fb_is_power_off(mfd) && mfd->dcm_state != DCM_ENTER)
 		|| !mfd->bl_updated) && !IS_CALIB_MODE_BL(mfd)) ||
 		mfd->panel_info->cont_splash_enabled) {
+		if((0 == temp) &&(0 == strcmp(boot_to_charger_mode,"charger"))
+			&& ((asus_lcd_id[0] == '0') || (asus_lcd_id[0] == '1')))
+		{
+		    PANEL_DBG("%s: turn off backlight for 550 hd panel\n",__FUNCTION__);
+			pdata = dev_get_platdata(&mfd->pdev->dev);
+			ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
+				panel_data);
+			if ((pdata) && (ctrl_pdata))
+				gpio_set_value((ctrl_pdata->bklt_en_gpio), 0);
+		}
 		mfd->unset_bl_level = bkl_lvl;
 		return;
 	} else {
@@ -1246,9 +1266,12 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 			     int op_enable)
 {
 	struct msm_fb_data_type *mfd = (struct msm_fb_data_type *)info->par;
+	struct mdss_panel_data *pdata;
+	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
 	int ret = 0;
 	int cur_power_state, req_power_state = MDSS_PANEL_POWER_OFF;
-
+	pdata = dev_get_platdata(&mfd->pdev->dev);
+	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,panel_data);
 	if (!mfd || !op_enable)
 		return -EPERM;
 
@@ -1321,7 +1344,12 @@ static int mdss_fb_blank_sub(int blank_mode, struct fb_info *info,
 				/* Stop Display thread */
 				if (mfd->disp_thread)
 					mdss_fb_stop_disp_thread(mfd);
+
 				mdss_fb_set_backlight(mfd, 0);
+				if ( (asus_lcd_id[0]=='2') && (asus_lcd_id[0]=='3') ){
+					printk("[DISP] %s Backlight Disabled\n",__func__);
+					gpio_set_value((ctrl_pdata->bklt_en_gpio), 0);
+				}
 				mfd->bl_updated = 0;
 			}
 			mfd->panel_power_state = req_power_state;
@@ -2059,12 +2087,20 @@ static int mdss_fb_open(struct fb_info *info, int user)
 	int result;
 	int pid = current->tgid;
 	struct task_struct *task = current->group_leader;
+	/* ASUS_BSP: Louis ++   */
+	static int unexpected_fb_open = 5;
 
 	if (mfd->shutdown_pending) {
-		pr_err("Shutdown pending. Aborting operation. Request from pid:%d name=%s\n",
-				pid, task->comm);
-		return -EPERM;
+		if (unexpected_fb_open > 0) {
+			unexpected_fb_open--;
+			pr_err("Shutdown pending. Aborting operation. Request from pid:%d name=%s, unexpected_fb_open(%d)\n",
+					pid, task->comm, unexpected_fb_open);
+			return -EPERM;
+		} else {
+			return 0;
+		}
 	}
+	/* ASUS_BSP: Louis --   */
 
 	file_info = kmalloc(sizeof(*file_info), GFP_KERNEL);
 	if (!file_info) {
@@ -2138,13 +2174,20 @@ static int mdss_fb_release_all(struct fb_info *info, bool release_all)
 	int pid = current->tgid;
 	bool unknown_pid = true, release_needed = false;
 	struct task_struct *task = current->group_leader;
-
+	/* ASUS_BSP: Holt ++   */
+	static int unexpected_fb_release = 5;
 	if (!mfd->ref_cnt) {
-		pr_info("try to close unopened fb %d! from %s\n", mfd->index,
+		if(unexpected_fb_release > 0)
+		{	
+			unexpected_fb_release--;
+			pr_info("try to close unopened fb %d! from %s\n", mfd->index,
 			task->comm);
-		return -EINVAL;
+			return -EINVAL;
+		} else {
+			return 0;
+		}
 	}
-
+	/* ASUS_BSP: Holt --   */
 	if (!wait_event_timeout(mfd->ioctl_q,
 		!atomic_read(&mfd->ioctl_ref_cnt) || !release_all,
 		msecs_to_jiffies(1000)))

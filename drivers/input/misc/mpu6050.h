@@ -130,6 +130,7 @@
 enum mpu_device_id {
 	MPU6050_ID = 0x68,
 	MPU6500_ID = 0x70,
+	MPU6880_ID = 0x78,
 };
 
 enum mpu_fsr {

@@ -788,6 +788,17 @@ config SENSORS_CAPELLA_CM36283
 	  To compile this driver as a module, choose M here: the
 	  module will be called CM36283.
 
+config  SENSORS_AP3426
+	tristate "AP3426 proximity and light sensor" 
+	depends on I2C
+	default n
+	help
+	  Say Y here to enable the AP3426 Proximity
+	  Sensor with Ambient Light Sensor.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called AP3426.
+
 config SENSORS_BMA2X2
 	tristate "BMA2x2 acceleration sensor support"
 	depends on I2C

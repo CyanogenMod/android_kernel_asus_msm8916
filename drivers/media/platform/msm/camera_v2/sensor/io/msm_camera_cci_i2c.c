@@ -26,12 +26,13 @@ int32_t msm_camera_cci_i2c_read(struct msm_camera_i2c_client *client,
 	uint32_t addr, uint16_t *data,
 	enum msm_camera_i2c_data_type data_type)
 {
-	int32_t rc = -EFAULT;
+	int32_t rc = -EFAULT,i;
 	unsigned char buf[client->addr_type+data_type];
 	struct msm_camera_cci_ctrl cci_ctrl;
 
 	if ((client->addr_type != MSM_CAMERA_I2C_BYTE_ADDR
-		&& client->addr_type != MSM_CAMERA_I2C_WORD_ADDR)
+		&& client->addr_type != MSM_CAMERA_I2C_WORD_ADDR 
+		&& client->addr_type != MSM_CAMERA_I2C_Fujitsu)
 		|| (data_type != MSM_CAMERA_I2C_BYTE_DATA
 		&& data_type != MSM_CAMERA_I2C_WORD_DATA))
 		return rc;
@@ -40,6 +41,12 @@ int32_t msm_camera_cci_i2c_read(struct msm_camera_i2c_client *client,
 	cci_ctrl.cci_info = client->cci_client;
 	cci_ctrl.cfg.cci_i2c_read_cfg.addr = addr;
 	cci_ctrl.cfg.cci_i2c_read_cfg.addr_type = client->addr_type;
+	if(cci_ctrl.cfg.cci_i2c_read_cfg.addr_type == MSM_CAMERA_I2C_Fujitsu)
+	{
+		//cci_ctrl.cfg.cci_i2c_read_cfg.fujitsu_addr = client->fujitsu_addr;
+		for(i = 0; i < 5; i++)
+			cci_ctrl.cfg.cci_i2c_read_cfg.fujitsu_addr[i] = client->fujitsu_addr[i];
+	}
 	cci_ctrl.cfg.cci_i2c_read_cfg.data = buf;
 	cci_ctrl.cfg.cci_i2c_read_cfg.num_byte = data_type;
 	rc = v4l2_subdev_call(client->cci_client->cci_subdev,
@@ -67,7 +74,8 @@ int32_t msm_camera_cci_i2c_read_seq(struct msm_camera_i2c_client *client,
 	struct msm_camera_cci_ctrl cci_ctrl;
 
 	if ((client->addr_type != MSM_CAMERA_I2C_BYTE_ADDR
-		&& client->addr_type != MSM_CAMERA_I2C_WORD_ADDR)
+		&& client->addr_type != MSM_CAMERA_I2C_WORD_ADDR
+		&& client->addr_type != MSM_CAMERA_I2C_Fujitsu)
 		|| num_byte == 0)
 		return rc;
 
@@ -80,6 +88,11 @@ int32_t msm_camera_cci_i2c_read_seq(struct msm_camera_i2c_client *client,
 	cci_ctrl.cci_info = client->cci_client;
 	cci_ctrl.cfg.cci_i2c_read_cfg.addr = addr;
 	cci_ctrl.cfg.cci_i2c_read_cfg.addr_type = client->addr_type;
+	if(cci_ctrl.cfg.cci_i2c_read_cfg.addr_type == MSM_CAMERA_I2C_Fujitsu)
+	{
+		for(i = 0; i < 5; i++)
+			cci_ctrl.cfg.cci_i2c_read_cfg.fujitsu_addr[i] = client->fujitsu_addr[i];
+	}
 	cci_ctrl.cfg.cci_i2c_read_cfg.data = buf;
 	cci_ctrl.cfg.cci_i2c_read_cfg.num_byte = num_byte;
 	rc = v4l2_subdev_call(client->cci_client->cci_subdev,

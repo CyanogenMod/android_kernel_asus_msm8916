@@ -1,0 +1,2 @@
+gauge_version:   0.0.4
+charger_version: 0.0.7

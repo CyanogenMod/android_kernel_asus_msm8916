@@ -351,6 +351,9 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 	}
 
 	state = decode_state(buf, n);
+	//[+++]Add log for power state change
+	ASUSEvtlog("[PM]allow kernel into main state\n");
+	//[---]Add log for power state change
 	if (state < PM_SUSPEND_MAX)
 		error = pm_suspend(state);
 	else if (state == PM_SUSPEND_MAX)

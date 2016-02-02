@@ -1618,7 +1618,28 @@ static int msm_routing_ext_ec_get(struct snd_kcontrol *kcontrol,
 	pr_debug("%s: ext_ec_ref_rx  = %x\n", __func__, msm_route_ext_ec_ref);
 
 	mutex_lock(&routing_lock);
-	ucontrol->value.integer.value[0] = msm_route_ext_ec_ref;
+	
+	//<asus-yusheng20150728+> Get the correct value for tinymix VOC_EXT_EC MUX
+	switch (msm_route_ext_ec_ref) {
+	case AFE_PORT_ID_PRIMARY_MI2S_TX:
+		ucontrol->value.integer.value[0] = 1;
+		break;
+	case AFE_PORT_ID_SECONDARY_MI2S_TX:
+		ucontrol->value.integer.value[0] = 2;
+		break;
+	case AFE_PORT_ID_TERTIARY_MI2S_TX:
+		ucontrol->value.integer.value[0] = 3;
+		break;
+	case AFE_PORT_ID_QUATERNARY_MI2S_TX:
+		ucontrol->value.integer.value[0] = 4;
+		break;
+	case AFE_PORT_INVALID:
+		ucontrol->value.integer.value[0] = 0;
+		break;
+	}
+	//ucontrol->value.integer.value[0] = msm_route_ext_ec_ref;
+	//<asus-yusheng20150728-> Get the correct value for tinymix VOC_EXT_EC MUX
+	
 	mutex_unlock(&routing_lock);
 	return 0;
 }
@@ -5239,6 +5260,9 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"PRI_MI2S_RX", NULL, "PRI_MI2S_RX Port Mixer"},
 
 	{"QUAT_MI2S_RX Port Mixer", "PRI_MI2S_TX", "PRI_MI2S_TX"},
+	//<asus-jason20150507+> add for dual speaker ATD command
+	{"QUAT_MI2S_RX Port Mixer", "TERT_MI2S_TX", "TERT_MI2S_TX"},
+	//<asus-jason20150507-> add for dual speaker ATD command
 	{"QUAT_MI2S_RX Port Mixer", "INTERNAL_FM_TX", "INT_FM_TX"},
 	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_RX Port Mixer"},
 

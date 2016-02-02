@@ -23,6 +23,7 @@ struct msm_camera_i2c_client {
 	struct msm_camera_cci_client *cci_client;
 	struct msm_camera_spi_client *spi_client;
 	enum msm_camera_i2c_reg_addr_type addr_type;
+	uint16_t *fujitsu_addr;
 };
 
 struct msm_camera_i2c_fn_t {

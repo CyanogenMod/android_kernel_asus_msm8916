@@ -378,6 +378,10 @@ qpnp_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alarm)
 	return 0;
 }
 
+#if defined(ASUS_FACTORY_BUILD)//jevian ++
+extern unsigned char jevian_wakeup_sign;
+static unsigned char jevian_contrl_sign = 1;
+#endif
 
 static int
 qpnp_rtc_alarm_irq_enable(struct device *dev, unsigned int enabled)
@@ -388,6 +392,10 @@ qpnp_rtc_alarm_irq_enable(struct device *dev, unsigned int enabled)
 	u8 ctrl_reg;
 	u8 value[4] = {0};
 
+#if defined(ASUS_FACTORY_BUILD)//jevian ++
+	if(jevian_wakeup_sign && jevian_contrl_sign)
+		return 0;
+#endif
 	spin_lock_irqsave(&rtc_dd->alarm_ctrl_lock, irq_flags);
 	ctrl_reg = rtc_dd->alarm_ctrl_reg1;
 	ctrl_reg = enabled ? (ctrl_reg | BIT_RTC_ALARM_ENABLE) :
@@ -415,6 +423,17 @@ rtc_rw_fail:
 	spin_unlock_irqrestore(&rtc_dd->alarm_ctrl_lock, irq_flags);
 	return rc;
 }
+
+#if defined(ASUS_FACTORY_BUILD)//jevian ++
+struct device *jevian_alarm_dev;
+void alarm_irq_disable(void)
+{
+	jevian_contrl_sign = 0;
+	qpnp_rtc_alarm_irq_enable(jevian_alarm_dev, 0);
+	jevian_contrl_sign = 1;
+}
+EXPORT_SYMBOL_GPL(alarm_irq_disable);
+#endif
 
 static struct rtc_class_ops qpnp_rtc_ops = {
 	.read_time = qpnp_rtc_read_time,
@@ -470,6 +489,9 @@ static int qpnp_rtc_probe(struct spmi_device *spmi)
 	struct resource *resource;
 	struct spmi_resource *spmi_resource;
 
+#if defined(ASUS_FACTORY_BUILD)//jevian ++
+	jevian_alarm_dev = &spmi->dev;
+#endif
 	rtc_dd = devm_kzalloc(&spmi->dev, sizeof(*rtc_dd), GFP_KERNEL);
 	if (rtc_dd == NULL) {
 		dev_err(&spmi->dev, "Unable to allocate memory!\n");

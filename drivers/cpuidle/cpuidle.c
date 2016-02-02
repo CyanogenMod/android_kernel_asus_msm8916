@@ -309,6 +309,7 @@ int cpuidle_enable_device(struct cpuidle_device *dev)
 	for (i = 0; i < dev->state_count; i++) {
 		dev->states_usage[i].usage = 0;
 		dev->states_usage[i].time = 0;
+		dev->states_usage[i].performance_mode = 0;
 	}
 	dev->last_residency = 0;
 
