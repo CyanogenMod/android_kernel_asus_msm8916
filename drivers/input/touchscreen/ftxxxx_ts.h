@@ -141,6 +141,7 @@ void ftxxxx_reset_tp(int HighOrLow);
 int ftxxxx_read_tp_id(void);
 u8 get_focal_tp_fw(void);
 void focal_glove_switch(bool plugin);
+void focal_keypad_switch(bool plugin);
 void ftxxxx_Enable_IRQ(struct i2c_client *client, int enable);
 int focal_get_HW_ID(void);
 void ftxxxx_nosync_irq_disable(struct i2c_client *client);
@@ -173,6 +174,7 @@ struct ftxxxx_ts_data {
 	bool cover_mode_states;
 	bool cover_mode_eable;
 	bool gesture_mode_eable;
+	bool keypad_mode_enable;
 	u8 gesture_mode_type;
 	bool reset_pin_status;
 	bool irq_lock_status;

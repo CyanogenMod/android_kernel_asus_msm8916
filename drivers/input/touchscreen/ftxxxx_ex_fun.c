@@ -1431,6 +1431,27 @@ static ssize_t switch_gesture_mode_show(struct device *dev, struct device_attrib
 
 }
 
+static ssize_t switch_keypad_mode_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	int tmp = 0;
+	tmp = buf[0] - 48;
+
+	if (tmp == 0) {
+		focal_keypad_switch(0);
+		printk("[Focal][Touch] keypad_mode_disable ! \n");
+	} else if (tmp == 1) {
+		focal_keypad_switch(1);
+		printk("[Focal][Touch] keypad_mode_enable ! \n");
+	}
+
+	return count;
+}
+
+static ssize_t switch_keypad_mode_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d\n", ftxxxx_ts->keypad_mode_enable);
+}
+
 #ifdef ASUS_FACTORY_BUILD
 static ssize_t flip_cover_mode_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -2574,6 +2595,7 @@ static DEVICE_ATTR(set_reset_pin_level, Focal_RW_ATTR, set_reset_pin_level_show,
 static DEVICE_ATTR(glove_mode, Focal_RW_ATTR, switch_glove_mode_show, switch_glove_mode_store);
 static DEVICE_ATTR(dclick_mode, Focal_RW_ATTR, switch_dclick_mode_show, switch_dclick_mode_store);
 static DEVICE_ATTR(gesture_mode, Focal_RW_ATTR, switch_gesture_mode_show, switch_gesture_mode_store);
+static DEVICE_ATTR(keypad_mode, Focal_RW_ATTR, switch_keypad_mode_show, switch_keypad_mode_store);
 static DEVICE_ATTR(HW_ID, Focal_RW_ATTR, asus_get_hwid_show, NULL);
 static DEVICE_ATTR(tp_disable_or_enable, Focal_RW_ATTR, irq_disable_show, irq_disable_store);
 static DEVICE_ATTR(flip_cover_mode,Focal_RW_ATTR,flip_cover_mode_show,flip_cover_mode_store);
@@ -2602,6 +2624,7 @@ static struct attribute *ftxxxx_attributes[] = {
 	&dev_attr_set_reset_pin_level.attr,
 	&dev_attr_glove_mode.attr,
 	&dev_attr_gesture_mode.attr,
+	&dev_attr_keypad_mode.attr,
 	&dev_attr_HW_ID.attr,
 	&dev_attr_dclick_mode.attr,
 	&dev_attr_tp_disable_or_enable.attr,
