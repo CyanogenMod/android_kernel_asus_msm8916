@@ -176,6 +176,7 @@ u8 FTS_gesture_register_d7;
 //static int ftxxxx_ts_resume(struct device *dev);
 //#endif
 struct ftxxxx_ts_data *ftxxxx_ts;
+static int virtual_keys_abs_y = 0;
 //static bool touch_down_up_status;
 
 #define TOUCH_MAX_X						720
@@ -345,6 +346,7 @@ static ssize_t focalTP_virtual_keys_register(struct kobject *kobj, struct kobj_a
 		//<asus-Jeffery20150323+>
 		case ASUS_ZE600KL:
 			#ifdef ZE600KL_HD
+			virtual_keys_abs_y = 1330 - 72/2;
 			virtual_keys = 	__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_BACK) ":160:1330:148:72" "\n" \
 
 						__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_HOME) ":360:1330:172:72" "\n" \
@@ -352,6 +354,7 @@ static ssize_t focalTP_virtual_keys_register(struct kobject *kobj, struct kobj_a
 						__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_MENU)   ":560:1330:148:72" "\n" ;			
 			#endif
 			#ifdef ZE601KL_FHD
+			virtual_keys_abs_y = 1995 - 222/2;
 			virtual_keys= 	__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_BACK) ":240:1995:222:108" "\n" \
 
 						__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_HOME) ":540:1995:258:108" "\n" \
@@ -361,6 +364,7 @@ static ssize_t focalTP_virtual_keys_register(struct kobject *kobj, struct kobj_a
 			break;
 		//<asus-Jeffery20150323->
 		case ASUS_ZX550KL:
+			virtual_keys_abs_y = 2045 - 250/2;
 			virtual_keys= 	__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_BACK) ":215:2045:260:250" "\n" \
 
 						__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_HOME) ":540:2045:260:250" "\n" \
@@ -368,6 +372,7 @@ static ssize_t focalTP_virtual_keys_register(struct kobject *kobj, struct kobj_a
 						__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_MENU)   ":865:2045:260:250" "\n" ;
 			break;
 		case ASUS_ZD550KL:
+			virtual_keys_abs_y = 2045 - 250/2;
 			virtual_keys= 	__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_BACK) ":215:2045:260:250" "\n" \
 
 						__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_HOME) ":540:2045:260:250" "\n" \
@@ -377,6 +382,7 @@ static ssize_t focalTP_virtual_keys_register(struct kobject *kobj, struct kobj_a
 		case ASUS_ZE550KL:
 		default:
 			#ifdef ZE550KL_HD
+			virtual_keys_abs_y = 1341 - 100/2;
 			virtual_keys = 	__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_BACK) ":140:1341:180:100" "\n" \
 
 						__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_HOME) ":360:1341:170:100" "\n" \
@@ -384,6 +390,7 @@ static ssize_t focalTP_virtual_keys_register(struct kobject *kobj, struct kobj_a
 						__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_MENU)   ":580:1341:180:100" "\n" ;
 			#endif
 			#ifdef ZE551KL_FHD
+			virtual_keys_abs_y = 2061 - 250/2;
 			virtual_keys= 	__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_BACK) ":215:2061:260:250" "\n" \
 
 						__stringify(EV_KEY) ":" __stringify(FT5x06_KEY_HOME) ":540:2061:260:250" "\n" \
@@ -887,7 +894,7 @@ if(asus_PRJ_ID == ASUS_ZE550KL){
 				}
 			}
 	
-		if(!report_point)
+		if(!report_point || (virtual_keys_abs_y && !ftxxxx_ts->keypad_mode_enable && event->au16_y[i] >= virtual_keys_abs_y))
 			continue;
 		
 		input_mt_slot(data->input_dev,event->au8_finger_id[i]);
@@ -1233,6 +1240,42 @@ void focal_glove_switch(bool plugin)
 
 	wake_unlock(&ftxxxx_ts->wake_lock);
 
+}
+
+void focal_keypad_switch(bool plugin)
+{
+	if (ftxxxx_ts == NULL) {
+		printk("[Focal][Touch] %s : ftxxxx_ts is null, skip \n", __func__);
+		return;
+	}
+
+	wake_lock(&ftxxxx_ts->wake_lock);
+
+	mutex_lock(&ftxxxx_ts->g_device_mutex);
+
+	if (ftxxxx_ts->init_success == 1) {
+		if (plugin) {
+			// Enable keypad
+			set_bit(KEY_BACK, ftxxxx_ts->input_dev->keybit);
+			set_bit(KEY_HOME, ftxxxx_ts->input_dev->keybit);
+			set_bit(KEY_APPSELECT, ftxxxx_ts->input_dev->keybit);
+
+			ftxxxx_ts->keypad_mode_enable = true;
+		} else {
+			// Disable keypad
+			clear_bit(KEY_BACK, ftxxxx_ts->input_dev->keybit);
+			clear_bit(KEY_HOME, ftxxxx_ts->input_dev->keybit);
+			clear_bit(KEY_APPSELECT, ftxxxx_ts->input_dev->keybit);
+
+			ftxxxx_ts->keypad_mode_enable = false;
+		}
+	}
+
+	input_sync(ftxxxx_ts->input_dev);
+
+	mutex_unlock(&ftxxxx_ts->g_device_mutex);
+
+	wake_unlock(&ftxxxx_ts->wake_lock);
 }
 
 static void focal_reset_ic_work(struct work_struct *work)
@@ -2094,6 +2137,7 @@ static int ftxxxx_ts_probe(struct i2c_client *client, const struct i2c_device_id
 	ftxxxx_ts->dclick_mode_eable = true;
 	ftxxxx_ts->gesture_mode_eable = true;
 	ftxxxx_ts->gesture_mode_type = 0;
+	ftxxxx_ts->keypad_mode_enable = true;
 	ftxxxx_ts->pdata = pdata;
 	Gesture_flag=0;
 	switch (asus_PRJ_ID)
