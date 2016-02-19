@@ -2040,7 +2040,7 @@ static int ftxxxx_ts_probe(struct i2c_client *client, const struct i2c_device_id
 	ftxxxx_ts->init_success = 0;
 	ftxxxx_ts->suspend_flag = 0;
 	ftxxxx_ts->usb_status = 0;
-	ftxxxx_ts->glove_mode_eable = true;
+	ftxxxx_ts->glove_mode_eable = false;
 	ftxxxx_ts->dclick_mode_eable = true;
 	ftxxxx_ts->gesture_mode_eable = true;
 	ftxxxx_ts->gesture_mode_type = 0;
