@@ -2276,7 +2276,7 @@ static ssize_t pwm_us_show(struct device *dev, struct device_attribute *attr,cha
 	pwm_cfg = led->mpp_cfg->pwm_cfg;
 	tmp = pwm_cfg->pwm_period_us;
 
-	return snprintf(buf, PAGE_SIZE,"pwm_us:%d\n",tmp);
+	return snprintf(buf, PAGE_SIZE,"%d\n",tmp);
 }
 
 
