@@ -525,8 +525,6 @@ static void determine_project_id(int pid)
 //<asus-guc20150427->
 //<asus-guc20150424->
 
-static uint8_t led_type = 0; //ASUS BSP Austin_T : LED charger mode +++
-
 static int __smb358_read_reg(struct smb358_charger *chip, u8 reg, u8 *val)
 {
 	s32 ret;
@@ -775,10 +773,8 @@ extern int get_charger_type(void)
 	ret = g_usb_state;
 	return ret;
 }
-struct delayed_work LED_ChargerMode;
 struct delayed_work USB_3s_retry_kicker_work;
 struct delayed_work USB_3s_retry_work;
-extern void led_set_charger_mode(uint8_t led_type); //ASUS BSP Austin_T : LED charger mode +++
 extern void focal_usb_detection(bool plugin);          //ASUS BSP Jacob_kung : notify touch cable in +++
 /* write 06h[6:5]="00" or "11" */
 int smb358_charging_toggle(charging_toggle_level_t level, bool on)
@@ -813,7 +809,6 @@ int smb358_charging_toggle(charging_toggle_level_t level, bool on)
 		}
 		result_toggle = false;
 		//focal_usb_detection(false); //ASUS BSP Jacob_kung : notify touch cable out +++
-		schedule_delayed_work(&LED_ChargerMode, 0*HZ);
 	} else {
 		result_toggle = on;
 	}
@@ -929,7 +924,6 @@ int smb358_charging_toggle_ze550(charging_toggle_level_t level, bool on)
 		}
 		result_toggle = false;
 		//focal_usb_detection(false); //ASUS BSP Jacob_kung : notify touch cable out +++
-		schedule_delayed_work(&LED_ChargerMode, 0*HZ);
 	} else {
 		result_toggle = on;
 	}
@@ -1046,7 +1040,6 @@ int smb358_charging_toggle_zd550_ze600(charging_toggle_level_t level, bool on)
 		}
 		result_toggle = false;
 		//focal_usb_detection(false); //ASUS BSP Jacob_kung : notify touch cable out +++
-		schedule_delayed_work(&LED_ChargerMode, 0*HZ);
 	} else {
 		result_toggle = on;
 	}
@@ -1514,55 +1507,8 @@ void SET_VCH_VALUE(struct work_struct *dat){
 	Batt_ID_reday = true;
 }
 
-//--0623 charger mode led--
-extern bool g_Charger_mode;
 extern bool g_bat_full;
 extern int get_bms_calculated_soc(int *rsoc);
-static bool charger_mode_cable_out = false;
-void LED_ChargerMode_Set(struct work_struct *dat){
-	int ret = 0;
-	int cap;
-	static uint8_t OldLedType = 0xFF;
-
-        if(!g_Charger_mode)
-		return;
-	
-	if(Batt_ID_reday){
-		ret = get_bms_calculated_soc(&cap);
-		if(ret){
-			printk("Read Battery Capacity fail\n");
-		}
-
-		if(Batt_ID_ERROR){
-			led_type = 0;
-			if(OldLedType != led_type)
-				led_set_charger_mode(led_type);	
-			OldLedType = led_type;
-			return;
-		}
-		
-		if((cap < 10) && (cap >= 0))
-			led_type = 3;
-		else{
-			if(g_bat_full)
-				led_type = 2;
-			else{
-					if((cap <= 99) && (cap >= 10))
-						led_type = 1;
-				}
-			}
-                if(charger_mode_cable_out)
-                {
-                        printk("Charger mode Cable Out! set LED off\n");
-                        led_type = 0;
-                }
-		if(OldLedType != led_type)
-		        led_set_charger_mode(led_type);
-                OldLedType = led_type;
-	}else
-		schedule_delayed_work(&LED_ChargerMode, 1*HZ);
-}
-//--0623 charger mode led--
 
 static inline struct power_supply *get_psy_usb(void)
 {
@@ -3501,7 +3447,6 @@ int asus_battery_update_status(void)
 	u32 cable_status; 
 	cable_status = get_charger_type();
 	charging_toggle = get_sw_charging_toggle();
-	schedule_delayed_work(&LED_ChargerMode, 0*HZ);
 		if (Batt_ID_ERROR){
 			return status;
 		}
@@ -4206,7 +4151,6 @@ int setSMB358Charger(int usb_state)
 					smb358_update_aicl_work(5);
 				}
 			}
-			schedule_delayed_work(&LED_ChargerMode, 0*HZ);
 		}
 		break;
 	case USB_IN:
@@ -4239,7 +4183,6 @@ int setSMB358Charger(int usb_state)
 			mutex_unlock(&g_usb_state_lock);
 			/*BSP david : do JEITA*/
 			smb358_update_aicl_work(0);
-			schedule_delayed_work(&LED_ChargerMode, 0*HZ);
 	                schedule_delayed_work(&USB_3s_retry_kicker_work, 0*HZ);
 		}
 		break; 
@@ -4266,9 +4209,6 @@ int setSMB358Charger(int usb_state)
 				}
 			}
 			JEITA_Flag=false;
-                        //set LED off in charger mode
-                        charger_mode_cable_out = true;
-			schedule_delayed_work(&LED_ChargerMode, 0*HZ);
 		}
 		break;
 	case ENABLE_5V:
@@ -4826,7 +4766,6 @@ static int smb358_charger_probe(struct i2c_client *client,
 
 	INIT_DELAYED_WORK(&Set_vch_val, SET_VCH_VALUE);
 	INIT_DELAYED_WORK(&AC_unstable_det, AC_unstable_detect);
-	INIT_DELAYED_WORK(&LED_ChargerMode, LED_ChargerMode_Set);
 	INIT_DELAYED_WORK(&USB_3s_retry_kicker_work, USB_3s_retry_kicker);
 	INIT_DELAYED_WORK(&USB_3s_retry_work, USB_3s_retry_set);
 	schedule_delayed_work(&Set_vch_val, (unsigned long)(charger_factor->SET_VCH_FREQ)* HZ);	//<asus-guc20150427>	3

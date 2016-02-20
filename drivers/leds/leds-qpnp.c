@@ -569,7 +569,6 @@ static struct qpnp_led_data *red_led;
 static struct qpnp_led_data *green_led;
 //ASUS_BSP Austin_T : add LED globe variable ---
 
-extern bool g_Charger_mode;	//ASUS_BSP Austin_T : add charger mode trigger
 extern int asus_PRJ_ID;
 void led_clean(void)
 {
@@ -2840,61 +2839,6 @@ static const struct attribute_group lpg_attr_group = {
 static const struct attribute_group blink_attr_group = {
 	.attrs = blink_attrs,
 };
-
-//ASUS BSP Austin_T : add for charger mode +++
-void led_set_charger_mode(uint8_t led_type)
-{
-
-        printk("[LED] led_set_charger_mode %d %d\n", led_type,g_Charger_mode);  //aa
-
-        if(!g_Charger_mode){
-		printk("[LED] led_set_charger_mode return %d\n", led_type);  //aa
-		return;
-	}
-			
-	if(led_type == 1)	// batery normal
-	{
-		printk("[LED] led_set_charger_mode charging %d\n", led_type);  //aa
-		
-		red_led->cdev.brightness = 255;
-		printk("[LED] red_led_brightness %d\n", red_led->cdev.brightness);  //aa
-		schedule_work(&red_led->work);
-		
-		green_led->cdev.brightness = 255;
-		printk("[LED] green_led_brightness %d\n", green_led->cdev.brightness);  //aa
-		schedule_work(&green_led->work);
-	}
-	else if(led_type == 2) // battery-full
-	{
-		printk("[LED] led_set_charger_mode full %d\n", led_type);  //aa
-		red_led->cdev.brightness = 0;
-		printk("[LED] red_led_brightness %d\n", red_led->cdev.brightness);  //aa
-		schedule_work(&red_led->work);
-		
-		green_led->cdev.brightness = 255;
-		printk("[LED] green_led_brightness %d\n", green_led->cdev.brightness);  //aa
-		schedule_work(&green_led->work);
-	}
-	else if(led_type == 3) // battery low
-	{
-		printk("[LED] led_set_charger_mode low %d\n", led_type);  //aa
-		green_led->cdev.brightness = 0;
-		printk("[LED] green_led_brightness %d\n", green_led->cdev.brightness);  //aa
-		schedule_work(&green_led->work);
-
-		red_led->cdev.brightness = 255;
-		printk("[LED] red_led_brightness %d\n", red_led->cdev.brightness);  //aa
-		schedule_work(&red_led->work);
-	}
-	else				// cable out
-	{
-		printk("[LED] led_set_charger_mode clean %d\n", led_type);  //aa
-		led_clean();
-		return;
-	}
-}
-//ASUS BSP Austin_T : add for charger mode ---
-EXPORT_SYMBOL(led_set_charger_mode);
 
 static int qpnp_flash_init(struct qpnp_led_data *led)
 {
