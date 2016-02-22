@@ -149,6 +149,13 @@ void ftxxxx_irq_disable(struct i2c_client *client);
 void ftxxxx_irq_enable(struct i2c_client *client);
 /* The platform data for the Focaltech ftxxxx touchscreen driver */
 
+//<asus-Jeffery20151202+>
+struct point_first_location {
+	u16 x;	
+	bool filter_flag;
+};
+//<asus-Jeffery20151202->
+
 
 struct ts_event {
 	u16 au16_x[CFG_MAX_TOUCH_POINTS];	/*x coordinate */

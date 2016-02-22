@@ -67,16 +67,16 @@ static unsigned char CTPM_FW_ZX550KL[] = {
 };
 //asus_jeffery_hsu+++
 static unsigned char CTPM_FW_ZD550KL_GIS_TM[] = {
-	#include "ASUS_ZD551KL_5446_0x61_0xB4_20150914_app.cfg"
+	#include "ASUS_ZD551KL_5446_0x61_0xB8_20151020_app.cfg"
 };
 static unsigned char CTPM_FW_ZD550KL_GIS_AUO[] = {
-	#include "ASUS_ZD551KL_5446_0x63_0xB3_20150914_app.cfg"
+	#include "ASUS_ZD551KL_5446_0x63_0xB9_20151028_app.cfg"
 };
 static unsigned char CTPM_FW_ZD550KL_Jtouch_TM[] = {
-	#include "ASUS_ZD551KL_5446_0x81_0xB4_20150914_app.cfg"
+	#include "ASUS_ZD551KL_5446_0x81_0xB8_20151020_app.cfg"
 };
 static unsigned char CTPM_FW_ZD550KL_Jtouch_AUO[] = {
-	#include "ASUS_ZD551KL_5446_0x83_0xB3_20150914_app.cfg"
+	#include "ASUS_ZD551KL_5446_0x83_0xB7_20151020_app.cfg"
 };
 //asus_jeffery_hsu---
 //<asus-Jeffery20150323+>
@@ -85,7 +85,7 @@ static unsigned char CTPM_FW_ZE600KL_CPT_TPK[] = {
 	#include "ASUS_ZE600KL_5446_0x52_0x25_20150709_app.cfg"
 };
 static unsigned char CTPM_FW_ZE600KL_CPT_JTOUCH[] = {
-	#include "ASUS_ZE600KL_5446_0x82_0x44_20151021_app.cfg"
+	#include "ASUS_ZE600KL_5446_0x82_0xA1_20151124_app.cfg"
 };
 static unsigned char CTPM_FW_ZE600KL_IVO_TPK[] = {
 	#include "ASUS_ZE600KL_5446_0x57_0x04_20150525_app.cfg"
@@ -96,16 +96,16 @@ static unsigned char CTPM_FW_ZE600KL_IVO_JTOUCH[] = {
 #endif
 #ifdef ZE601KL_FHD
 static unsigned char CTPM_FW_ZE601KL_TPK[] = {
-	#include "ASUS_ZE601KL_5446_0x53_0x47_20151021_app.cfg"
+	#include "ASUS_ZE601KL_5446_0x53_0xA1_20151124_app.cfg"
 };
 static unsigned char CTPM_FW_ZE601KL_JTOUCH[] = {
-	#include "ASUS_ZE601KL_5446_0x83_0x47_20151021_app.cfg"
+	#include "ASUS_ZE601KL_5446_0x83_0xA4_20151203_app.cfg"
 };
 static unsigned char CTPM_FW_ZE601KL_TM_TPK[] = {
-	#include "ASUS_ZE601KL_5446_0x51_0x48_20151021_app.cfg"
+	#include "ASUS_ZE601KL_5446_0x51_0xA2_20151124_app.cfg"
 };
 static unsigned char CTPM_FW_ZE601KL_TM_JTOUCH[] = {
-	#include "ASUS_ZE601KL_5446_0x81_0x48_20151021_app.cfg"
+	#include "ASUS_ZE601KL_5446_0x81_0xA2_20151124_app.cfg"
 };
 
 #endif
@@ -184,6 +184,10 @@ int SCab_7;
 int SCab_8;
 static int TP_TEST_RESULT;
 #endif
+
+//<Jeffery20151202++>
+bool keyboard_enable=false; 
+//<Jeffery20151202-->
 
 /*zax 20141116 -------------------*/
 int HidI2c_To_StdI2c(struct i2c_client *client)
@@ -1558,7 +1562,27 @@ static ssize_t asus_itr_status_show(struct device *dev, struct device_attribute 
 
 	return sprintf(buf, "%d\n", tmp);
 }
+//<asus-Jeffery20151202+>
+static ssize_t keyboard_enable_show(struct device *dev, struct device_attribute *attr, char *buf){
+return sprintf(buf,"%d\n",keyboard_enable);
+}
 
+static ssize_t keyboard_enable_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count){
+	int tmp = 0;
+	tmp = buf[0] - 48;
+	wake_lock(&ftxxxx_ts->wake_lock);
+	mutex_lock(&ftxxxx_ts->g_device_mutex);
+	if (tmp == 0) {
+		keyboard_enable = false;
+	}else{
+	keyboard_enable = true;
+	}
+	mutex_unlock(&ftxxxx_ts->g_device_mutex);
+	wake_unlock(&ftxxxx_ts->wake_lock);
+	return count;
+}
+
+//<asus-Jeffery20151202->
 //<asus-Jeffery20150604+>
 
 static ssize_t vendor_id_show(struct device *dev, struct device_attribute *attr, char *buf){
@@ -2600,6 +2624,8 @@ static DEVICE_ATTR(HW_ID, Focal_RW_ATTR, asus_get_hwid_show, NULL);
 static DEVICE_ATTR(tp_disable_or_enable, Focal_RW_ATTR, irq_disable_show, irq_disable_store);
 static DEVICE_ATTR(flip_cover_mode,Focal_RW_ATTR,flip_cover_mode_show,flip_cover_mode_store);
 static DEVICE_ATTR(vendor_id,Focal_RW_ATTR,vendor_id_show,NULL);//<asus-Jeffery20150604+>
+static DEVICE_ATTR(keyboardEnable,Focal_RW_ATTR,keyboard_enable_show,keyboard_enable_store);//<asus-Jeffery20151202+>
+
 
 /*add your attr in here*/
 static struct attribute *ftxxxx_attributes[] = {
@@ -2630,6 +2656,7 @@ static struct attribute *ftxxxx_attributes[] = {
 	&dev_attr_tp_disable_or_enable.attr,
 	&dev_attr_flip_cover_mode.attr,
 	&dev_attr_vendor_id.attr,
+	&dev_attr_keyboardEnable.attr,
 	NULL
 };
 

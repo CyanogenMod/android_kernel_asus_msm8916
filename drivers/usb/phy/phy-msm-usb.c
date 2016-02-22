@@ -51,7 +51,9 @@
 #include <linux/qpnp/qpnp-adc.h>
 
 #include <linux/msm-bus.h>
-
+#include <linux/path.h>
+#include <linux/namei.h>
+#include <linux/dcache.h>
 #define MSM_USB_BASE	(motg->regs)
 #define MSM_USB_PHY_CSR_BASE (motg->phy_csr_regs)
 
@@ -111,7 +113,8 @@ enum host_auto_sw {
 	HOST_AUTO_HOST,
 };
 
-const char *usb_device_list[] = {"/Removable/USBdisk1", "/sys/class/net/eth0", "/sys/class/sound/card1"};
+//const char *usb_device_list[] = {"/storage/USBdisk1", "/sys/class/net/eth0", "/sys/class/sound/card1"};
+const char *usb_device_list[] = {"/sys/class/net/eth0", "/sys/class/sound/card1"};
 static struct workqueue_struct *early_suspend_delay_wq;
 static struct delayed_work early_suspend_delay_work;
 static struct work_struct late_resume_work;
@@ -124,6 +127,11 @@ struct completion gadget_init;
 static struct msm_otg *the_msm_otg;
 static bool debug_aca_enabled;
 static bool debug_bus_voting_enabled;
+//<asus-bob20151116+>
+static bool ultimate_mode_enabled = false;
+static bool is_ultimate_mode = false;
+static enum usb_bus_vote backup_usb_bus_vote = USB_NO_PERF_VOTE;
+//<asus-bob20151116->
 static bool mhl_det_in_progress;
 
 static struct regulator *hsusb_3p3;
@@ -738,8 +746,19 @@ static bool asus_otg_keep_power_on_check(void)
 	mm_segment_t oldfs;
 	int index = 0, num = 0, ret = 0;
 
+	struct path p;
+	int err;
 	oldfs = get_fs();
 	set_fs(get_ds());
+	err = kern_path("/storage/USBdisk1", 0, &p);
+	if(!err) {
+		if(IS_ROOT(p.dentry )) {
+			ret = 1;
+			path_put(&p);
+			goto exit_fs_check;
+		}
+		path_put(&p);
+	}
 
 	num = sizeof(usb_device_list)/sizeof(usb_device_list[0]);
 
@@ -754,7 +773,7 @@ static bool asus_otg_keep_power_on_check(void)
 			break;
 		}
 	}
-
+exit_fs_check:
 	set_fs(oldfs);
 
 	return ret;
@@ -1824,6 +1843,10 @@ static void msm_otg_bus_vote(struct msm_otg *motg, enum usb_bus_vote vote)
 	int ret;
 	struct msm_otg_platform_data *pdata = motg->pdata;
 
+//<asus-bob20151116+>
+	if(!is_ultimate_mode)
+		backup_usb_bus_vote = vote;
+//<asus-bob20151116->
 	/* Check if target allows min_vote to be same as no_vote */
 	if (pdata->bus_scale_table &&
 	    vote >= pdata->bus_scale_table->num_usecases)
@@ -1835,11 +1858,16 @@ static void msm_otg_bus_vote(struct msm_otg *motg, enum usb_bus_vote vote)
 		if (ret)
 			dev_err(motg->phy.dev, "%s: Failed to vote (%d)\n"
 				   "for bus bw %d\n", __func__, vote, ret);
+//<asus-bob20151116+>
 		if (vote == USB_MAX_PERF_VOTE)
 			msm_otg_bus_clks_enable(motg);
 		else
-			msm_otg_bus_clks_disable(motg);
+		{
+			if(!ultimate_mode_enabled)
+				msm_otg_bus_clks_disable(motg);
+		}
 	}
+//<asus-bob20151116->
 }
 
 static void msm_otg_enable_phy_hv_int(struct msm_otg *motg)
@@ -2613,6 +2641,19 @@ static void msm_otg_set_online_status(struct msm_otg *motg)
 	/* Set power supply online status to false */
 	if (power_supply_set_online(psy, false))
 		dev_dbg(motg->phy.dev, "error setting power supply property\n");
+}
+extern bool g_Charger_mode;
+static void msm_otg_cdp_connect(struct msm_otg *motg)
+{
+	printk("[%s] %d\n", __func__, __LINE__);
+	if (g_Charger_mode && motg->chg_type == USB_CDP_CHARGER) {
+		//pull D+ for CDP port
+		printk("[%s] %d\n", __func__, __LINE__);
+		usb_gadget_connect(motg->phy.otg->gadget);
+		mdelay(100); //BC1.2 spec min timing is 40ms
+		usb_gadget_disconnect(motg->phy.otg->gadget);
+	}
+	printk("[%s] %d\n", __func__, __LINE__);
 }
 
 static void msm_otg_notify_charger(struct msm_otg *motg, unsigned mA)
@@ -3529,11 +3570,11 @@ static void msm_chg_detect_work(struct work_struct *w)
 	/* resume the device first if at all it resumes */
 	pm_runtime_resume(phy->dev);
 
-        if (!gadget_init.done) {
-                ret = wait_for_completion_timeout(&gadget_init,msecs_to_jiffies(2000));
-                if (!ret)
-                        dev_err(motg->phy.dev, "%so: timeout waiting for gadget driver\n",__func__);
-        }
+    if (!gadget_init.done && motg->chg_state == USB_CHG_STATE_UNDEFINED) {
+            ret = wait_for_completion_timeout(&gadget_init,msecs_to_jiffies(5000));
+            if (!ret)
+				pr_err("%s: timeout waiting for gadget driver\n",__func__);
+    }
 	
         switch (motg->chg_state) {
 	case USB_CHG_STATE_UNDEFINED:
@@ -3887,6 +3928,7 @@ static void msm_otg_sm_work(struct work_struct *w)
 					msm_otg_start_peripheral(otg, 1);
 					otg->phy->state =
 						OTG_STATE_B_PERIPHERAL;
+					msm_otg_cdp_connect(motg);
 					break;
 				case USB_ACA_C_CHARGER:
 					msm_otg_notify_charger(motg,
@@ -5026,7 +5068,50 @@ static ssize_t msm_otg_bus_write(struct file *file, const char __user *ubuf,
 
 	return count;
 }
+//<asus-bob20151116+>
+static int ultimate_mode_show(struct seq_file *s, void *unused)
+{
+	if (ultimate_mode_enabled)
+		seq_printf(s, "enabled\n");
+	else
+		seq_printf(s, "disabled\n");
 
+	return 0;
+}
+
+static int ultimate_mode_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, ultimate_mode_show, inode->i_private);
+}
+
+static ssize_t ultimate_mode_write(struct file *file, const char __user *ubuf,
+				size_t count, loff_t *ppos)
+{
+	char buf[8];
+	struct seq_file *s = file->private_data;
+	struct msm_otg *motg = s->private;
+
+	is_ultimate_mode = true;
+	memset(buf, 0x00, sizeof(buf));
+
+	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
+	{
+		is_ultimate_mode = false;
+		return -EFAULT;
+	}
+
+	if (!strncmp(buf, "enable", 6)) {
+		ultimate_mode_enabled = true;
+		msm_otg_bus_vote(motg, USB_MAX_PERF_VOTE);
+	} else {
+		ultimate_mode_enabled = false;
+		msm_otg_bus_vote(motg, backup_usb_bus_vote);
+	}
+
+	is_ultimate_mode = false;
+	return count;
+}
+//<asus-bob20151116->
 static int
 otg_get_prop_usbin_voltage_now(struct msm_otg *motg)
 {
@@ -5204,6 +5289,15 @@ const struct file_operations msm_otg_bus_fops = {
 	.llseek = seq_lseek,
 	.release = single_release,
 };
+//<asus-bob20151116+>
+const struct file_operations ultimate_mode_fops = {
+	.open = ultimate_mode_open,
+	.read = seq_read,
+	.write = ultimate_mode_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+//<asus-bob20151116->
 
 static struct dentry *msm_otg_dbg_root;
 
@@ -5270,7 +5364,16 @@ static int msm_otg_debugfs_init(struct msm_otg *motg)
 		debugfs_remove_recursive(msm_otg_dbg_root);
 		return -ENODEV;
 	}
+//<asus-bob20151116+>
+	msm_otg_dentry = debugfs_create_file("ultimate_mode", S_IRUGO | S_IWUSR,
+		msm_otg_dbg_root, motg,
+		&ultimate_mode_fops);
 
+	if (!msm_otg_dentry) {
+		debugfs_remove_recursive(msm_otg_dbg_root);
+		return -ENODEV;
+	}
+//<asus-bob20151116->
 	msm_otg_dentry = debugfs_create_file("otg_state", S_IRUGO,
 				msm_otg_dbg_root, motg, &msm_otg_state_fops);
 
