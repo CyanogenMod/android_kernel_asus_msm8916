@@ -1849,3 +1849,5 @@
 };
 
 #include "msm8939-gpu.dtsi"
+
+#include "cyanogenmod-asus-common.dtsi"
