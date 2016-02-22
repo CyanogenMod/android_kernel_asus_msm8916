@@ -131,6 +131,43 @@ static ssize_t pstore_file_read(struct file *file, char __user *userbuf,
 	return simple_read_from_buffer(userbuf, count, ppos, ps->data, ps->size);
 }
 
+#define PSTORE_ANNOTATE_MAX_SIZE 0x100
+static ssize_t pstore_file_write(struct file *file, const char __user *userbuf,
+						 size_t count, loff_t *ppos)
+{
+	struct seq_file *sf = file->private_data;
+	struct pstore_private *ps = sf->private;
+	char *buffer;
+	ssize_t ret = 0;
+	ssize_t saved_count = count;
+
+	if (!count || !userbuf)
+		return 0;
+
+	if (ps->type != PSTORE_TYPE_ANNOTATE)
+		return count;
+
+	if (count > PSTORE_ANNOTATE_MAX_SIZE)
+		count = PSTORE_ANNOTATE_MAX_SIZE;
+
+	buffer = kmalloc(count + 1, GFP_KERNEL);
+	if (!buffer)
+		return -ENOMEM;
+
+	if (copy_from_user(buffer, userbuf, count)) {
+		ret = -EFAULT;
+		goto write_out;
+	}
+
+	buffer[count] = '\0';
+	pstore_annotate(buffer);
+	ret = saved_count;
+
+write_out:
+	kfree(buffer);
+	return ret;
+}
+
 static int pstore_file_open(struct inode *inode, struct file *file)
 {
 	struct pstore_private *ps = inode->i_private;
@@ -163,6 +200,7 @@ static loff_t pstore_file_llseek(struct file *file, loff_t off, int whence)
 static const struct file_operations pstore_file_operations = {
 	.open		= pstore_file_open,
 	.read		= pstore_file_read,
+	.write		= pstore_file_write,
 	.llseek		= pstore_file_llseek,
 	.release	= seq_release,
 };
@@ -178,6 +216,8 @@ static int pstore_unlink(struct inode *dir, struct dentry *dentry)
 	if (p->psi->erase)
 		p->psi->erase(p->type, p->id, p->count,
 			      dentry->d_inode->i_ctime, p->psi);
+	else
+		return -EPERM;
 
 	return simple_unlink(dir, dentry);
 }
@@ -320,13 +360,16 @@ int pstore_mkfile(enum pstore_type_id type, char *psname, u64 id, int count,
 		scnprintf(name, sizeof(name), "console-%s", psname);
 		break;
 	case PSTORE_TYPE_FTRACE:
-		scnprintf(name, sizeof(name), "ftrace-%s", psname);
+		scnprintf(name, sizeof(name), "ftrace-%s-%lld", psname, id);
 		break;
 	case PSTORE_TYPE_MCE:
 		scnprintf(name, sizeof(name), "mce-%s-%lld", psname, id);
 		break;
 	case PSTORE_TYPE_PMSG:
 		scnprintf(name, sizeof(name), "pmsg-%s-%lld", psname, id);
+		break;
+	case PSTORE_TYPE_ANNOTATE:
+		snprintf(name, sizeof(name), "annotate-%s", psname);
 		break;
 	case PSTORE_TYPE_UNKNOWN:
 		scnprintf(name, sizeof(name), "unknown-%s-%lld", psname, id);
@@ -339,9 +382,8 @@ int pstore_mkfile(enum pstore_type_id type, char *psname, u64 id, int count,
 
 	mutex_lock(&root->d_inode->i_mutex);
 
-	rc = -ENOSPC;
 	dentry = d_alloc_name(root, name);
-	if (IS_ERR(dentry))
+	if (!dentry)
 		goto fail_lockedalloc;
 
 	memcpy(private->data, data, size);
