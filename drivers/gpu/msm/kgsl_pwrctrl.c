@@ -1010,13 +1010,11 @@ void kgsl_pwrctrl_clk(struct kgsl_device *device, int state,
 	{
 		pwr->min_pwrlevel = 1;
 		asus_sb_test = 1;
-		printk("ASUS SB enable\n");
 	}
 	else if(asus_sb_enable == 0 && asus_sb_test == 1)
 	{
 		pwr->min_pwrlevel = pwr->num_pwrlevels - 1;
 		asus_sb_test = 0;
-		printk("ASUS SB disable\n");
 	}
 	//ASUS Joy_Lin ---
 	
