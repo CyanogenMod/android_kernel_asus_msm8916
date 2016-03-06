@@ -370,7 +370,7 @@ static void dsi_cpt_panel_bklt_cmd_config(struct dcs_cmd_req* cmdreq, int level)
 	level = (level+1)*16-1;	//scale 0~255 brightness to 12bits
 	led_pwm_cpt[1] = level/256;	//set paramter1; MSB 4 bits
 	led_pwm_cpt[2] = level & 0xff; //set parameter2; LSB 8 bits
-	PANEL_DBG("%s: led_pwm_cpt 0x%02x, 0x%02x\n",__FUNCTION__,led_pwm_cpt[1], led_pwm_cpt[2]);
+	pr_debug("%s: led_pwm_cpt 0x%02x, 0x%02x\n",__FUNCTION__,led_pwm_cpt[1], led_pwm_cpt[2]);
 	cmdreq->cmds = &cpt_backlight_cmd;
 	cmdreq->flags = CMD_REQ_COMMIT | CMD_CLK_CTRL | CMD_REQ_UNICAST;
 }
@@ -388,12 +388,12 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 			return;
 	}
 
-	PANEL_DBG("%s: set level %d\n",__FUNCTION__,level);
+	pr_debug("%s: set level %d\n",__FUNCTION__,level);
 
 	led_pwm1[1] = (unsigned char)level;
 
 	if(level == 0){
-		PANEL_DBG("disable backlight enable gpio\n");
+		pr_debug("disable backlight enable gpio\n");
 		gpio_set_value((ctrl->bklt_en_gpio), 0);
 		if(asus_lcd_id[0]=='4'){
 			//pr_err("[Jeffery] delay 90ms\n");
@@ -415,7 +415,7 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 			//if( (asus_lcd_id[0] == '2') || (asus_lcd_id[0] == '3') )
 			//mdelay(20);
 
-			PANEL_DBG("enable backlight enable gpio\n");
+			pr_debug("enable backlight enable gpio\n");
 			gpio_set_value((ctrl->bklt_en_gpio), 1);
 			bkl_off = 0;
 		}
@@ -485,7 +485,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
-	PANEL_FUNC;
+
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
@@ -901,7 +901,6 @@ static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 		pr_err("%s: Invalid input data\n", __func__);
 		return -EINVAL;
 	}
-	PANEL_FUNC;
 
 	pinfo = &pdata->panel_info;
 	ctrl = container_of(pdata, struct mdss_dsi_ctrl_pdata,
@@ -995,7 +994,7 @@ int set_tcon_cabc(int mode)
 	cabc_mode[1] &= ~PANEL_CABC_MASK;
 	cabc_mode[1] |= (mode & PANEL_CABC_MASK);
     if (g_mdss_pdata->panel_info.panel_power_state == MDSS_PANEL_POWER_ON) {
-        PANEL_DBG("write cabc mode = 0x%x\n", cabc_mode[1]);
+        pr_debug("write cabc mode = 0x%x\n", cabc_mode[1]);
 
         memset(&cmdreq, 0, sizeof(cmdreq));
         cmdreq.cmds = tcon_cabc_cmd;
@@ -1006,7 +1005,7 @@ int set_tcon_cabc(int mode)
         mdss_dsi_cmdlist_put(ctrl_pdata, &cmdreq);
 		ret = 0;
     } else {
-        PANEL_DBG("CABC Set Fail: mode=%d\n", mode);
+        pr_debug("CABC Set Fail: mode=%d\n", mode);
 		ret = 1;
     }
 	
