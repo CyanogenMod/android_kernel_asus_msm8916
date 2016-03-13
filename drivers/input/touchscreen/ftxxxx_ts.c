@@ -79,7 +79,6 @@
 
 #ifdef FTS_GESTRUE
 /*zax 20140922*/
-#define KEY_GESTURE_DOUBLECLICK 256
 #define KEY_GESTURE_UP		257
 #define KEY_GESTURE_DOWN	258
 #define KEY_GESTURE_LEFT	259
@@ -536,9 +535,8 @@ static void check_gesture(struct ftxxxx_ts_data *data, int gesture_id)
 			case GESTURE_DOUBLECLICK:
 				if(dclick_flags==true)
 				{
-					input_report_key(data->input_dev, KEY_GESTURE_DOUBLECLICK, 1);
-					input_sync(data->input_dev);
-					input_report_key(data->input_dev, KEY_GESTURE_DOUBLECLICK, 0);
+					input_report_key(data->input_dev, KEY_POWER, 1);
+					input_report_key(data->input_dev, KEY_POWER, 0);
 					input_sync(data->input_dev);
 					printk(KERN_EMERG "[Focal][Touch] double click\n");
 					dclick_flags=false;
@@ -2364,7 +2362,7 @@ static int ftxxxx_ts_probe(struct i2c_client *client, const struct i2c_device_id
 
 #ifdef FTS_GESTRUE	/*zax 20140922*/
 	/* ++++ touch gesture mode support part in ZE500CL ++++ */
-	input_set_capability(input_dev, EV_KEY, KEY_GESTURE_DOUBLECLICK);
+	input_set_capability(input_dev, EV_KEY, KEY_POWER);
 	input_set_capability(input_dev, EV_KEY, KEY_GESTURE_V);
 	input_set_capability(input_dev, EV_KEY, KEY_GESTURE_Z);
 	input_set_capability(input_dev, EV_KEY, KEY_GESTURE_C);
@@ -2372,7 +2370,7 @@ static int ftxxxx_ts_probe(struct i2c_client *client, const struct i2c_device_id
 	input_set_capability(input_dev, EV_KEY, KEY_GESTURE_S);
 	input_set_capability(input_dev, EV_KEY, KEY_GESTURE_W);
 
-	__set_bit(KEY_GESTURE_DOUBLECLICK, input_dev->keybit);
+	__set_bit(KEY_POWER, input_dev->keybit);
 	__set_bit(KEY_GESTURE_V, input_dev->keybit);
 	__set_bit(KEY_GESTURE_Z, input_dev->keybit);
 	__set_bit(KEY_GESTURE_C, input_dev->keybit);
