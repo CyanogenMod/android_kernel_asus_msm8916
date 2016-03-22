@@ -591,8 +591,13 @@ _kgsl_sharedmem_page_alloc(struct kgsl_memdesc *memdesc,
 			size_t size)
 {
 	int ret = 0;
-	int len, page_size, sglen_alloc, sglen = 0;
+	int page_size, sglen_alloc, sglen = 0;
+	size_t len;
 	unsigned int align;
+
+	size = PAGE_ALIGN(size);
+	if (size == 0 || size > UINT_MAX)
+		return -EINVAL;
 
 	align = (memdesc->flags & KGSL_MEMALIGN_MASK) >> KGSL_MEMALIGN_SHIFT;
 
@@ -701,7 +706,9 @@ _kgsl_sharedmem_page_alloc(struct kgsl_memdesc *memdesc,
 
 	memdesc->sglen = sglen;
 	memdesc->size = size;
-	sg_mark_end(&memdesc->sg[sglen - 1]);
+
+	if (sglen > 0)
+		sg_mark_end(&memdesc->sg[sglen - 1]);
 
 done:
 	KGSL_STATS_ADD(memdesc->size, kgsl_driver.stats.page_alloc,
