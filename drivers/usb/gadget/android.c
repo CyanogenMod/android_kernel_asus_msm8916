@@ -2455,7 +2455,7 @@ struct mass_storage_function_config {
 static int mass_storage_function_init(struct android_usb_function *f,
 					struct usb_composite_dev *cdev)
 {
-	//struct android_dev *dev = cdev_to_android_dev(cdev);
+	struct android_dev *dev = cdev_to_android_dev(cdev);
 	struct mass_storage_function_config *config;
 	struct fsg_common *common;
 	int err;
@@ -2472,7 +2472,6 @@ static int mass_storage_function_init(struct android_usb_function *f,
 	}
 
 	config->fsg.nluns = 1;
-/*
 	snprintf(name[0], MAX_LUN_NAME, "lun");
 	config->fsg.luns[0].removable = 1;
 
@@ -2483,12 +2482,6 @@ static int mass_storage_function_init(struct android_usb_function *f,
 		snprintf(name[config->fsg.nluns], MAX_LUN_NAME, "rom");
 		config->fsg.nluns++;
 	}
-*/
-
-	snprintf(name[0], MAX_LUN_NAME, "rom");
-        config->fsg.luns[0].removable = 0;
-        config->fsg.luns[0].cdrom = 1;
-        config->fsg.luns[0].ro = 1;
 
 	if (uicc_nluns > FSG_MAX_LUNS - config->fsg.nluns) {
 		uicc_nluns = FSG_MAX_LUNS - config->fsg.nluns;
@@ -3954,7 +3947,6 @@ static int android_probe(struct platform_device *pdev)
 
 		pdata->cdrom = of_property_read_bool(pdev->dev.of_node,
 			"qcom,android-usb-cdrom");
-		pdata->cdrom = 1;
 		ret = of_property_read_u8(pdev->dev.of_node,
 				"qcom,android-usb-uicc-nluns",
 				&pdata->uicc_nluns);
