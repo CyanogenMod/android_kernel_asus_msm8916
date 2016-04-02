@@ -55,6 +55,8 @@ module_param(vote_threshold, uint, 0664);
 
 static bool suspended = false;
 static ktime_t last_action;
+static bool interactive = true;
+static bool big_cluster_enabled = true;
 static bool little_cluster_enabled = true;
 static unsigned int vote_up = 0;
 static unsigned int vote_down = 0;
@@ -132,6 +134,46 @@ static unsigned int get_num_unloaded_little_cpus(void)
 	return unloaded_cpus;
 }
 
+static void enable_big_cluster(void)
+{
+	unsigned int cpu;
+	unsigned int num_up = 0;
+
+	if (big_cluster_enabled)
+		return;
+
+	for_each_present_cpu(cpu) {
+		if (is_big_cpu(cpu) && !cpu_online(cpu)) {
+			cpu_up(cpu);
+			num_up++;
+		}
+	}
+
+	pr_info("cluster_plug: %d big cpus enabled\n", num_up);
+
+	big_cluster_enabled = true;
+}
+
+static void disable_big_cluster(void)
+{
+	unsigned int cpu;
+	unsigned int num_down = 0;
+
+	if (!big_cluster_enabled)
+		return;
+
+	for_each_present_cpu(cpu) {
+		if (is_big_cpu(cpu) && cpu_online(cpu)) {
+			cpu_down(cpu);
+			num_down++;
+		}
+	}
+
+	pr_info("cluster_plug: %d big cpus disabled\n", num_down);
+
+	big_cluster_enabled = false;
+}
+
 static void enable_little_cluster(void)
 {
 	unsigned int cpu;
@@ -172,8 +214,24 @@ static void disable_little_cluster(void)
 	little_cluster_enabled = false;
 }
 
+static void
+queue_clusterplug_work(unsigned ms)
+{
+	queue_delayed_work(clusterplug_wq, &cluster_plug_work, msecs_to_jiffies(ms));
+}
+
 static void __ref cluster_plug_work_fn(struct work_struct *work)
 {
+	if (!interactive) {
+		enable_little_cluster();
+		disable_big_cluster();
+		/* Do not schedule more work */
+		return;
+	}
+
+	if (interactive && !big_cluster_enabled)
+		enable_big_cluster();
+
 	if (!suspended && cluster_plug_active) {
 		unsigned int loaded_cpus = get_num_loaded_big_cpus();
 		unsigned int unloaded_cpus = get_num_unloaded_little_cpus();
@@ -210,9 +268,35 @@ static void __ref cluster_plug_work_fn(struct work_struct *work)
 		last_action = now;
 	}
 
-	queue_delayed_work(clusterplug_wq, &cluster_plug_work,
-		msecs_to_jiffies(sampling_time));
+	queue_clusterplug_work(sampling_time);
 }
+
+static int __ref interactive_show(char *buf,
+			const struct kernel_param *kp __attribute__ ((unused)))
+{
+	return snprintf(buf, PAGE_SIZE, "%d", interactive);
+}
+
+static int __ref interactive_store(const char *buf,
+			const struct kernel_param *kp __attribute__ ((unused)))
+{
+	int ret, value;
+
+	ret = kstrtoint(buf, 0, &value);
+	if (ret == 0) {
+		interactive = (value != 0);
+		queue_clusterplug_work(1);
+	}
+
+	return 0;
+}
+
+static const struct kernel_param_ops param_ops_interactive = {
+	.set = interactive_store,
+	.get = interactive_show
+};
+
+module_param_cb(interactive, &param_ops_interactive, &interactive, 0664);
 
 int __init cluster_plug_init(void)
 {
@@ -223,8 +307,7 @@ int __init cluster_plug_init(void)
 	clusterplug_wq = alloc_workqueue("clusterplug",
 				WQ_HIGHPRI | WQ_UNBOUND, 1);
 	INIT_DELAYED_WORK(&cluster_plug_work, cluster_plug_work_fn);
-	queue_delayed_work_on(0, clusterplug_wq, &cluster_plug_work,
-		msecs_to_jiffies(10));
+	queue_clusterplug_work(10);
 
 	return 0;
 }
