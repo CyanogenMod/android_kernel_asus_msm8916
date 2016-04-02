@@ -258,19 +258,22 @@ static void cluster_plug_perform(void)
 
 static void __ref cluster_plug_work_fn(struct work_struct *work)
 {
-	if (!interactive) {
-		enable_little_cluster();
-		disable_big_cluster();
-		/* Do not schedule more work */
-		return;
-	}
-
-	if (interactive && !big_cluster_enabled)
-		enable_big_cluster();
-
 	if (active) {
+		if (!interactive) {
+			enable_little_cluster();
+			disable_big_cluster();
+			/* Do not schedule more work */
+			return;
+		}
+
+		if (interactive && !big_cluster_enabled)
+			enable_big_cluster();
+
 		cluster_plug_perform();
 		queue_clusterplug_work(sampling_time);
+	} else {
+		enable_big_cluster();
+		enable_little_cluster();
 	}
 }
 
