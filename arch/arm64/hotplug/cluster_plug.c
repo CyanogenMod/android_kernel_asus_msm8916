@@ -55,6 +55,7 @@ module_param(vote_threshold, uint, 0664);
 
 static bool suspended = false;
 static ktime_t last_action;
+static bool little_cluster_enabled = true;
 static unsigned int vote_up = 0;
 static unsigned int vote_down = 0;
 
@@ -136,6 +137,9 @@ static void enable_little_cluster(void)
 	unsigned int cpu;
 	unsigned int num_up = 0;
 
+	if (little_cluster_enabled)
+		return;
+
 	for_each_present_cpu(cpu) {
 		if (is_little_cpu(cpu) && !cpu_online(cpu)) {
 			cpu_up(cpu);
@@ -143,14 +147,18 @@ static void enable_little_cluster(void)
 		}
 	}
 
-	if (num_up > 0)
-		pr_info("cluster_plug: %d little cpus enabled\n", num_up);
+	pr_info("cluster_plug: %d little cpus enabled\n", num_up);
+
+	little_cluster_enabled = true;
 }
 
 static void disable_little_cluster(void)
 {
 	unsigned int cpu;
 	unsigned int num_down = 0;
+
+	if (!little_cluster_enabled)
+		return;
 
 	for_each_present_cpu(cpu) {
 		if (is_little_cpu(cpu) && cpu_online(cpu)) {
@@ -159,8 +167,9 @@ static void disable_little_cluster(void)
 		}
 	}
 
-	if (num_down > 0)
-		pr_info("cluster_plug: %d little cpus disabled\n", num_down);
+	pr_info("cluster_plug: %d little cpus disabled\n", num_down);
+
+	little_cluster_enabled = false;
 }
 
 static void __ref cluster_plug_work_fn(struct work_struct *work)
