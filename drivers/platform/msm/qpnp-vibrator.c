@@ -431,7 +431,7 @@ static ssize_t qpnp_vib_level_store(struct device *dev,
 		val = vib->vtg_min;
 	} else if (val > vib->vtg_max) {
 		pr_err("%s: level %d not in range (%d - %d), using max.", __func__, val, vib->vtg_min, vib->vtg_max);
-		val = vib->vtg_min;
+		val = vib->vtg_max;
 	}
 
 	vib->vtg_level = val;
