@@ -386,6 +386,22 @@ static u64 update_load(int cpu)
 	return now;
 }
 
+#ifdef CONFIG_CLUSTER_PLUG
+
+extern bool cluster_plug_is_low_power_mode(void);
+
+unsigned long go_hispeed_load(struct cpufreq_interactive_tunables *tunables)
+{
+	if (cluster_plug_is_low_power_mode())
+		return 10000;
+	else
+		return tunables->go_hispeed_load;
+}
+
+#else
+#define go_hispeed_load(tunables) ((tunables)->go_hispeed_load)
+#endif
+
 static void cpufreq_interactive_timer(unsigned long data)
 {
 	u64 now;
@@ -452,7 +468,7 @@ static void cpufreq_interactive_timer(unsigned long data)
 	cpu_load = loadadjfreq / pcpu->policy->cur;
 	boosted = tunables->boost_val || now < tunables->boostpulse_endtime;
 
-	if (cpu_load >= tunables->go_hispeed_load || boosted) {
+	if (cpu_load >= go_hispeed_load(tunables) || boosted) {
 		if (pcpu->policy->cur < tunables->hispeed_freq) {
 			new_freq = tunables->hispeed_freq;
 		} else {
