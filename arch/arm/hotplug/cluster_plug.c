@@ -125,10 +125,11 @@ static unsigned int get_num_unloaded_little_cpus(void)
 	unsigned int cpu;
 	unsigned int unloaded_cpus = 0;
 
-	for_each_online_cpu(cpu) {
+	for_each_possible_cpu(cpu) {
 		if (is_little_cpu(cpu)) {
 			unsigned int cpu_load = get_delta_cpu_load_and_update(cpu);
-			if (cpu_load < load_threshold_down)
+			/* If a little big is offline, treat it as unloaded */
+			if (!cpu_online(cpu) || cpu_load < load_threshold_down)
 				unloaded_cpus += 1;
 		}
 	}
@@ -224,8 +225,8 @@ static void cluster_plug_perform(void)
 	unsigned int unloaded_cpus = get_num_unloaded_little_cpus();
 	ktime_t now = ktime_get();
 
-	pr_debug("cluster-plug: loaded: %u unloaded: %u votes %d / %d\n",
-		loaded_cpus, unloaded_cpus, vote_up, vote_down);
+	pr_debug("cluster-plug: little %d loaded: %u unloaded: %u votes %d / %d\n",
+		little_cluster_enabled, loaded_cpus, unloaded_cpus, vote_up, vote_down);
 
 	if (ktime_to_ms(ktime_sub(now, last_action)) > 5*sampling_time) {
 		pr_info("cluster_plug: ignoring old ts %lld\n",
