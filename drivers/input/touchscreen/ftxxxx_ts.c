@@ -526,8 +526,6 @@ static void check_gesture(struct ftxxxx_ts_data *data, int gesture_id)
 	bool Ps_status = false;
 
 //	printk(KERN_EMERG "[Focal][Touch] %s :  gesture_id = 0x%x\n ", __func__, gesture_id);
-		if(!ftxxxx_ts->cover_mode_states)
-			Ps_status = proximity_check_status();
 	if (!Ps_status) {
 		switch (gesture_id) {
 		/* ++++ touch gesture mode support part in ZE500CL ++++ */
