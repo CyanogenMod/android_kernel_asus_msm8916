@@ -118,7 +118,6 @@
 short pointnum = 0;
 unsigned short coordinate_x[150] = {0};
 unsigned short coordinate_y[150] = {0};
-static bool dclick_flags;
 
 int gestrue_id = 0;
 //static u32 touch_control;
@@ -529,15 +528,11 @@ static void check_gesture(struct ftxxxx_ts_data *data, int gesture_id)
 		/* ++++ touch gesture mode support part in ZE500CL ++++ */
 		
 			case GESTURE_DOUBLECLICK:
-				if(dclick_flags==true)
-				{
-					input_report_key(data->input_dev, KEY_WAKEUP, 1);
-					input_sync(data->input_dev);
-					input_report_key(data->input_dev, KEY_WAKEUP, 0);
-					input_sync(data->input_dev);
-					printk(KERN_EMERG "[Focal][Touch] double click\n");
-					dclick_flags=false;
-				}
+				input_report_key(data->input_dev, KEY_WAKEUP, 1);
+				input_sync(data->input_dev);
+				input_report_key(data->input_dev, KEY_WAKEUP, 0);
+				input_sync(data->input_dev);
+				printk(KERN_EMERG "[Focal][Touch] double click\n");
 				break;
 			case GESTURE_V:
 				input_report_key(data->input_dev, KEY_GESTURE_V, 1);
@@ -1332,7 +1327,6 @@ static void focal_suspend_work(struct work_struct *work)
 		return;
 	}
 #ifdef FTS_GESTRUE/*zax 20140922*/
-	dclick_flags=true;
 	if ((ftxxxx_ts->dclick_mode_eable == true) || (ftxxxx_ts->gesture_mode_eable == true)) {
 			printk(KERN_EMERG "[Focal][Touch] %s : Touch gesture mode \n", __func__);
 			enable_irq_wake(ftxxxx_ts->client->irq);
