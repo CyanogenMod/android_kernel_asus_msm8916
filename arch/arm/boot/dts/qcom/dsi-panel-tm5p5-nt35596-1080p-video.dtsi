@@ -110,5 +110,8 @@
                 qcom,mdss-pan-physical-width-dimension = <68>; //width of picture in mm (for xdpi)
 		qcom,mdss-pan-physical-height-dimension = <121>; //height of picture in mm (for ydpi)
 		qcom,mdss-dsi-lp11-init;
+		qcom,mdss-dsi-pan-enable-dynamic-fps;
+		qcom,mdss-dsi-pan-fps-update = "dfps_immediate_porch_mode";
+		qcom,mdss-dsi-min-refresh-rate = <30>;
 	};
 };
