@@ -47,6 +47,10 @@
 		_SMB358_MASK((LEFT_BIT_POS) - (RIGHT_BIT_POS) + 1, \
 			(RIGHT_BIT_POS))
 
+// hax
+#define PRJ_ID 1
+#define ADAPTER_ID 1
+
 /* Config/Control registers */
 #define CHG_CURRENT_CTRL_REG		0x0
 #define CHG_OTH_CURRENT_CTRL_REG	0x1
@@ -258,7 +262,7 @@ extern bool thermal_abnormal;
 //BSP Ben add adapter_id for 5w (BZ sku) porting
 //adapter_id:   0 = 5w
 //              1 = 10w
-extern int asus_project_ADAPTER_ID;
+//extern int ADAPTER_ID;
 
 enum {
 	USER	= BIT(0),
@@ -419,8 +423,8 @@ struct smb_adaptive_factors {
 };
 static struct smb_adaptive_factors PROJ_ASUS_ZE550KL = {
 	/*voltage and current*/
-	SMB358_FLOAT_VOLTAGE_VALUE_4140mV, 
-	SMB358_FAST_CHG_CURRENT_VALUE_600mA, 
+	SMB358_FLOAT_VOLTAGE_VALUE_4380mV,
+	SMB358_FAST_CHG_CURRENT_VALUE_1300mA,
 	/*battery's temperature*/
 	15,
 	100,
@@ -459,8 +463,8 @@ static struct smb_adaptive_factors PROJ_ASUS_ZE600KL = {
 
 static struct smb_adaptive_factors PROJ_ASUS_ZX550KL = {
 	/*voltage and current*/
-	SMB358_FLOAT_VOLTAGE_VALUE_4140mV, 
-	SMB358_FAST_CHG_CURRENT_VALUE_600mA, 
+	SMB358_FLOAT_VOLTAGE_VALUE_4380mV,
+	SMB358_FAST_CHG_CURRENT_VALUE_1300mA,
 	/*battery's temperature*/
 	15,
 	100,
@@ -1994,9 +1998,9 @@ static void smb358_config_max_current(int usb_state)
 		return;
 	}
         //ZD550KL & ZE600KL Porting
-        if(asus_PRJ_ID==ASUS_ZD550KL||asus_PRJ_ID==ASUS_ZE600KL)
+        if(PRJ_ID==ASUS_ZD550KL||PRJ_ID==ASUS_ZE600KL)
         {
-                if(asus_project_ADAPTER_ID)
+                if(ADAPTER_ID)
                 {
 	                BAT_DBG("%s: use ZD550KL & ZE600KL charger porting!\n", __FUNCTION__);
                         smb358_pre_config_zd550_ze600();
@@ -2007,7 +2011,7 @@ static void smb358_config_max_current(int usb_state)
                         smb3xx_config_max_current_5wBZsku_zd550(usb_state);
                 }
         //ZE550KL & ZE551KL( porting)
-        }else if(asus_PRJ_ID==ASUS_ZE550KL){
+        }else if(PRJ_ID==ASUS_ZE550KL){
         	//if((asus_lcd_id[0]=='0') ||(asus_lcd_id[0]=='1')){
 	        	BAT_DBG("%s: use default(ZE550KL) charger porting!\n", __FUNCTION__);
                 smb358_pre_config_ze550();
@@ -2353,9 +2357,9 @@ int smb358_charger_control_jeita(void)
 		}
 #endif
 
-	if(asus_PRJ_ID==ASUS_ZD550KL||asus_PRJ_ID==ASUS_ZE600KL){
+	if(PRJ_ID==ASUS_ZD550KL||PRJ_ID==ASUS_ZE600KL){
                 ret = smb358_charging_toggle_zd550_ze600(JEITA, charging_enable);
-    		}else if(asus_PRJ_ID==ASUS_ZE550KL){
+    		}else if(PRJ_ID==ASUS_ZE550KL){
     			ret = smb358_charging_toggle_ze550(JEITA, charging_enable);
 	}else {
                 ret = smb358_charging_toggle(JEITA, charging_enable);
@@ -3791,7 +3795,7 @@ void aicl_dete_worker(struct work_struct *dat)
 		aicl_result = get_aicl_results();
 		BAT_DBG("%s: aicl result(%dmA) with AICL status:%d\n", __FUNCTION__, aicl_result, reg);
 		/*if AICL result <= 500, then config input current but don't do JEITA*/
-		if(asus_PRJ_ID==ASUS_ZD550KL||asus_PRJ_ID==ASUS_ZE600KL){
+		if(PRJ_ID==ASUS_ZD550KL||PRJ_ID==ASUS_ZE600KL){
 			BAT_DBG("%s: ZD550KL & ZE600KL flow\n", __FUNCTION__);
                   	if (aicl_result <= 500 && Thermal_Level < 2) {
 			        BAT_DBG("%s: don't do JEITA when aicl result(%dmA) <= 500mA.\n", __FUNCTION__, aicl_result);
@@ -3807,8 +3811,8 @@ void aicl_dete_worker(struct work_struct *dat)
 			        BAT_DBG("%s:Iusb_in 2000mA.\n", __FUNCTION__);
 		        }
                 }else{
-          		//if((asus_PRJ_ID==ASUS_ZE550KL)&&((asus_lcd_id[0]=='0')||(asus_lcd_id[0]=='1'))){
-          		if(asus_PRJ_ID==ASUS_ZE550KL){
+          		//if((PRJ_ID==ASUS_ZE550KL)&&((asus_lcd_id[0]=='0')||(asus_lcd_id[0]=='1'))){
+          		if(PRJ_ID==ASUS_ZE550KL){
 					BAT_DBG("%s: ze550kl flow\n", __FUNCTION__);
 					if (aicl_result <= 500 && Thermal_Level < 2) {
 							BAT_DBG("%s: don't do JEITA when aicl result(%dmA) <= 500mA.\n", __FUNCTION__, aicl_result);
@@ -3834,15 +3838,15 @@ void aicl_dete_worker(struct work_struct *dat)
         	}
 	}
 	
-        if(asus_PRJ_ID==ASUS_ZD550KL||asus_PRJ_ID==ASUS_ZE600KL){
-                if(asus_project_ADAPTER_ID){
+        if(PRJ_ID==ASUS_ZD550KL||PRJ_ID==ASUS_ZE600KL){
+                if(ADAPTER_ID){
 			BAT_DBG("%s:use zd550 ze600 JEITA setting.\n", __FUNCTION__);
                         aicl_time = smb358_soc_detect_batt_tempr_zd550_ze600(usb_state);
                 }else{
 			BAT_DBG("%s:[5wBZsku] use 5wBZsku zd550 ze600 JEITA setting.\n", __FUNCTION__);
                         aicl_time = smb358_soc_detect_batt_tempr_5wBZsku_zd550(usb_state);
                 }
-        }else if(asus_PRJ_ID==ASUS_ZE550KL){
+        }else if(PRJ_ID==ASUS_ZE550KL){
         		//if((asus_lcd_id[0]=='0') ||(asus_lcd_id[0]=='1')){   //ze550kl
                 	aicl_time=smb358_soc_detect_batt_tempr_ze550(usb_state);
         		/*}else if((asus_lcd_id[0]=='2') ||(asus_lcd_id[0]=='3')){     //ze551kl
@@ -4079,7 +4083,7 @@ int setSMB358Charger(int usb_state)
 		"UNKNOWN_IN",
 		"SE1_IN",
 	};
-	if(asus_PRJ_ID==ASUS_ZE550KL)
+	if(PRJ_ID==ASUS_ZE550KL)
 		g_usb_state = usb_state;
 	else{
 		if( usb_state != CABLE_OUT )
@@ -4111,13 +4115,13 @@ int setSMB358Charger(int usb_state)
 		if (smb358_dev) {			
 			if(!wake_lock_active(&UsbCable_Lock))
 				wake_lock(&UsbCable_Lock);
-			if(asus_PRJ_ID == ASUS_ZD550KL) {
+			if(PRJ_ID == ASUS_ZD550KL) {
 				focal_usb_detection(true);
 			}
-			if(asus_PRJ_ID == ASUS_ZE600KL) {
+			if(PRJ_ID == ASUS_ZE600KL) {
 				focal_usb_detection(true);
 			}
-			if(asus_PRJ_ID==ASUS_ZE550KL){
+			if(PRJ_ID==ASUS_ZE550KL){
 				mutex_lock(&g_usb_state_lock);
 				/*BSP david : do initial setting & config current*/
 				smb358_config_max_current(g_usb_state);
@@ -4156,15 +4160,15 @@ int setSMB358Charger(int usb_state)
 	case USB_IN:
 	case UNKNOWN_IN:
 	case SE1_IN:
-		if(asus_PRJ_ID == ASUS_ZD550KL) {
+		if(PRJ_ID == ASUS_ZD550KL) {
 			if(usb_state==USB_IN)
 				focal_usb_detection(true);
 		}
-		if(asus_PRJ_ID == ASUS_ZE600KL) {
+		if(PRJ_ID == ASUS_ZE600KL) {
 			if(usb_state==USB_IN)
 				focal_usb_detection(true);
 		}
-		if(asus_PRJ_ID==ASUS_ZE550KL){
+		if(PRJ_ID==ASUS_ZE550KL){
 			if(usb_state==USB_IN)
 				focal_usb_detection(true);
 		}else{	
@@ -4190,13 +4194,13 @@ int setSMB358Charger(int usb_state)
 		if (smb358_dev) {	
 			if(wake_lock_active(&UsbCable_Lock))
 				wake_unlock(&UsbCable_Lock);
-			if(asus_PRJ_ID == ASUS_ZD550KL) {
+			if(PRJ_ID == ASUS_ZD550KL) {
 				focal_usb_detection(false);
 			}
-			if(asus_PRJ_ID == ASUS_ZE600KL) {
+			if(PRJ_ID == ASUS_ZE600KL) {
 				focal_usb_detection(false);
 			}
-			if(asus_PRJ_ID==ASUS_ZE550KL){
+			if(PRJ_ID==ASUS_ZE550KL){
 				schedule_delayed_work(&AC_unstable_det, 0);
 				focal_usb_detection(false);
 			}else{
@@ -4213,7 +4217,7 @@ int setSMB358Charger(int usb_state)
 		break;
 	case ENABLE_5V:
 		if (smb358_dev) {
-			if(asus_PRJ_ID==ASUS_ZE550KL){
+			if(PRJ_ID==ASUS_ZE550KL){
 			}else{
 				/* BSP Clay: AC debounce policy */
 				if(AC_IN_EVER == true){
@@ -4226,7 +4230,7 @@ int setSMB358Charger(int usb_state)
 		break;
 	case DISABLE_5V:
 		if (smb358_dev) {
-			if(asus_PRJ_ID==ASUS_ZE550KL){
+			if(PRJ_ID==ASUS_ZE550KL){
 			}else{
 				/* BSP Clay: AC debounce policy */
 				if(AC_IN_EVER == true){
@@ -4746,7 +4750,7 @@ static int smb358_charger_probe(struct i2c_client *client,
 //BSP Ben add adapter_id for 5w (BZ sku) porting
 //adapter_id:   0 = 5w
 //              1 = 10w
-        printk("%s:ADAPTER_ID=<%d>\n",__func__,asus_project_ADAPTER_ID);
+        printk("%s:ADAPTER_ID=<%d>\n",__func__,ADAPTER_ID);
 
 #if defined(ASUS_FACTORY_BUILD)
 	eng_charging_limit = false;
@@ -4760,7 +4764,7 @@ static int smb358_charger_probe(struct i2c_client *client,
 	create_ChargerRegDump_proc_file();
 	create_chargerIC_status_proc_file();
 	create_battID_read_proc_file();
-	determine_project_id(asus_PRJ_ID);
+	determine_project_id(PRJ_ID);
 
 	smb358_enable_volatile_writes(smb358_dev);
 
