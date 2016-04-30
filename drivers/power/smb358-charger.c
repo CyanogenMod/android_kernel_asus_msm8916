@@ -398,7 +398,7 @@ struct smb_adaptive_factors {
 static struct smb_adaptive_factors PROJ_ASUS_ZE550KL = {
 	/*voltage and current*/
 	SMB358_FLOAT_VOLTAGE_VALUE_4140mV,
-	SMB358_FAST_CHG_CURRENT_VALUE_600mA,
+	SMB358_FAST_CHG_CURRENT_VALUE_1300mA,
 	/*battery's temperature*/
 	15,
 	100,
@@ -438,7 +438,7 @@ static struct smb_adaptive_factors PROJ_ASUS_ZE600KL = {
 static struct smb_adaptive_factors PROJ_ASUS_ZX550KL = {
 	/*voltage and current*/
 	SMB358_FLOAT_VOLTAGE_VALUE_4140mV,
-	SMB358_FAST_CHG_CURRENT_VALUE_600mA,
+	SMB358_FAST_CHG_CURRENT_VALUE_1300mA,
 	/*battery's temperature*/
 	15,
 	100,
