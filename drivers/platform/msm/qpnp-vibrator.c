@@ -508,7 +508,7 @@ static int qpnp_vibrator_probe(struct spmi_device *spmi)
 	return 0;
 
 error_create_level:
-	device_remove_file(vib->timed_dev.dev, &dev_attr_vtg_level);
+	timed_output_dev_unregister(&vib->timed_dev);
 error_create_level_default:
 	device_remove_file(vib->timed_dev.dev, &dev_attr_vtg_level_default);
 error_create_min:
