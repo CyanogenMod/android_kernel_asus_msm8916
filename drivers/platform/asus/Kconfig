@@ -1,0 +1,29 @@
+# ASUS configuration options
+
+config MACH_ASUS
+	bool "ASUS device"
+	depends on ARCH_MSM
+	help
+	  Support for ASUS products
+
+config MACH_ASUS_MSM8916
+	bool "ASUS MSM8916"
+	depends on ARCH_MSM8916 && MACH_ASUS
+	help
+	  Support for MSM8916 ASUS variants
+
+menu "ASUS board selection"
+
+	config MACH_ASUS_Z00T
+		bool "ASUS_Z00T board"
+		depends on MACH_ASUS_MSM8916
+		help
+		  Support for Asus Zenfone 2 Laser 1080p
+
+	config MACH_ASUS_Z00L
+		bool "ASUS_Z00L board"
+		depends on MACH_ASUS_MSM8916
+		help
+		  Support for Asus Zenfone 2 Laser 720p
+
+endmenu
