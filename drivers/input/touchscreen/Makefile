@@ -3,11 +3,11 @@
 #
 
 # Each configuration option enables a list of files.
-ifeq ($(TARGET_PRODUCT),Z00L)
+ifeq ($(CONFIG_MACH_ASUS_Z00L),y)
 EXTRA_CFLAGS	+= -DZE550KL_HD
 EXTRA_CFLAGS	+= -DZE600KL_HD
 endif
-ifeq ($(TARGET_PRODUCT),Z00T)
+ifeq ($(CONFIG_MACH_ASUS_Z00T),y)
 EXTRA_CFLAGS	+= -DZE551KL_FHD
 EXTRA_CFLAGS	+= -DZE601KL_FHD
 endif
