@@ -1,5 +1,11 @@
 ifeq ($(CONFIG_OF),y)
 
+
+dtb-$(CONFIG_ARCH_MSM8916) += msm8916-mtp-ze550kl.dtb \
+        msm8939-cdp-ze550kl.dtb \
+        msm8939-cdp-ze600kl.dtb \
+	msm8939-cdp-zd550kl.dtb
+
 dtb-$(CONFIG_ARCH_MSM8974) += msm8974-v1-cdp.dtb \
 	msm8974-v1-fluid.dtb \
 	msm8974-v1-liquid.dtb \
@@ -91,7 +97,6 @@ dtb-$(CONFIG_ARCH_MSM8916) += msm8916-cdp.dtb \
 	msm8939-qrd-skul.dtb \
 	msm8939-cdp.dtb \
 	msm8939-cdp-jdi.dtb \
-	msm8939-cdp-jdi-a216-fhd.dtb \
 	msm8939-mtp.dtb \
 	msm8939-mtp-jdi.dtb \
 	msm8939-mtp-smb1360.dtb \
@@ -100,7 +105,6 @@ dtb-$(CONFIG_ARCH_MSM8916) += msm8916-cdp.dtb \
 	msm8939-v3.0-qrd-skul.dtb \
 	msm8939-v3.0-cdp.dtb \
 	msm8939-v3.0-cdp-jdi.dtb \
-	msm8939-v3.0-cdp-jdi-a216-fhd.dtb \
 	msm8939-v3.0-mtp.dtb \
 	msm8939-v3.0-mtp-jdi.dtb \
 	msm8939-v3.0-mtp-smb1360.dtb \
@@ -251,8 +255,6 @@ dtb-$(CONFIG_ARCH_MSM8994) += msm8994-v1-sim.dtb \
 	apq8094-v2-liquid.dtb \
 	apq8094-v2-fluid.dtb
 
-dtb-$(CONFIG_ARCH_MSM8992) += msm8992-sim.dtb \
-	msm8992-rumi.dtb
 
 DTB_NAMES := $(subst $\",,$(CONFIG_BUILD_ARM_APPENDED_DTB_IMAGE_NAMES))
 ifneq ($(DTB_NAMES),)

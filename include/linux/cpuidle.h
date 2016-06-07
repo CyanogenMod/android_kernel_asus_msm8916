@@ -35,6 +35,7 @@ struct cpuidle_state_usage {
 	unsigned long long	disable;
 	unsigned long long	usage;
 	unsigned long long	time; /* in US */
+	unsigned long long	performance_mode;
 };
 
 struct cpuidle_state {

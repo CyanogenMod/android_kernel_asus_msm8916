@@ -135,6 +135,196 @@ static char *static_command_line;
 static char *execute_command;
 static char *ramdisk_execute_command;
 
+
+//ASUS_BSP Austin_T : add for kernel charger mode. +++
+bool g_Charger_mode = false;
+
+static int set_charger_mode(char *str)
+{
+    if ( strcmp("charger", str) == 0 )
+        g_Charger_mode = true;
+    else
+        g_Charger_mode = false;
+
+    printk("g_Charger_mode = %d\n", g_Charger_mode);
+    return 0;
+}
+__setup("androidboot.mode=", set_charger_mode);
+EXPORT_SYMBOL(g_Charger_mode);
+//ASUS_BSP Austin_T : add for kernel charger mode. ---
+//+++ ASUS_BSP :  Add for project id @wigman_sun
+int asus_PRJ_ID = 0;
+EXPORT_SYMBOL(asus_PRJ_ID);
+static int set_project_id(char *str)
+{
+    printk("prj_id = %s\n", str);
+	if( strcmp("0", str) == 0 ){
+		asus_PRJ_ID = ASUS_ZE550KL;
+	}else if( strcmp("1", str) == 0 ){
+		asus_PRJ_ID = ASUS_ZE600KL;
+	}else if( strcmp("2", str) == 0 ){
+		asus_PRJ_ID = ASUS_ZX550KL;
+	}else if( strcmp("3", str) == 0 ){
+		asus_PRJ_ID = ASUS_ZD550KL;
+	}
+	
+    return 0;
+}
+__setup("PRJ_ID=", set_project_id);
+//--- ASUS_BSP :  Add for project id
+
+//+++ ASUS_BSP :  Add for lcd unique id @wigman_sun
+char lcd_unique_id[64] = {0};
+EXPORT_SYMBOL(lcd_unique_id);
+
+static int get_lcd_uniqueId(char *str)
+{
+	strncpy(lcd_unique_id, str, sizeof(lcd_unique_id));
+	printk("lcd_unique_id = %s\n ", lcd_unique_id);
+
+    return 0;
+}
+__setup("LCD_UNIQUE_ID=", get_lcd_uniqueId);
+//--- ASUS_BSP :  Add for lcd unique
+
+//+++ ASUS_BSP :  Add for asus_project_stage @wigman_sun
+char asus_project_stage[2] = {0};
+EXPORT_SYMBOL(asus_project_stage);
+
+static int get_prj_stage(char *str)
+{
+	strcpy(asus_project_stage,str);
+	printk("asus_project_stage = %s\n ", asus_project_stage);
+
+    return 0;
+}
+__setup("PRJ_STAGE=", get_prj_stage);
+//--- ASUS_BSP :  Add for asus_project_stage
+
+//+++ ASUS_BSP :  Add for asus_project_hd @wigman_sun
+char asus_project_hd[2] = {0};
+EXPORT_SYMBOL(asus_project_hd);
+
+static int get_prj_hd(char *str)
+{
+	strcpy(asus_project_hd,str);
+	printk("asus_project_hd = %s\n ", asus_project_hd);
+
+    return 0;
+}
+__setup("PRJ_HD=", get_prj_hd);
+//--- ASUS_BSP :  Add for asus_project_hd
+
+
+//+++ ASUS_BSP :  Add for asus_lcd_id @wigman_sun
+char asus_lcd_id[2] = {0};
+EXPORT_SYMBOL(asus_lcd_id);
+
+static int get_lcd_id(char *str)
+{
+	strcpy(asus_lcd_id,str);
+	printk("asus_lcd_id = %s\n ", asus_lcd_id);
+
+    return 0;
+}
+__setup("LCD_ID=", get_lcd_id);
+//--- ASUS_BSP :  Add for get_lcd_id
+
+//++++ sean_lu@asus.com add "support laser sensor 2nd source"
+int g_ASUS_laserID = 1;
+
+static int set_laser_id(char *str)
+{
+    if ( strcmp("1", str) == 0 )
+    {
+        g_ASUS_laserID = 1;
+    }
+    else
+    {
+        g_ASUS_laserID = 0;
+    }
+    printk("Kernel LASER ID = %d\n", g_ASUS_laserID);
+    return 0;
+}
+__setup("LASER_ID=", set_laser_id);
+EXPORT_SYMBOL(g_ASUS_laserID);
+//---- sean_lu@asus.com add "support laser sensor 2nd source"
+
+//+++ ASUS_BSP :  Add for asus_project_stage @wigman_sun
+char asus_project_mem[4] = {0};
+EXPORT_SYMBOL(asus_project_mem);
+
+static int get_prj_mem(char *str)
+{
+	strcpy(asus_project_mem,str);
+	printk("asus_project_mem = %s\n ", asus_project_mem);
+
+    return 0;
+}
+__setup("PRJ_MEM=", get_prj_mem);
+//--- ASUS_BSP :  Add for asus_project_stage
+
+
+//+++ ASUS_BSP :  Add for asus_project_RFsku @wigman_sun
+char asus_project_RFsku[2] = {0};
+EXPORT_SYMBOL(asus_project_RFsku);
+
+static int get_prj_RFsku(char *str)
+{
+	strcpy(asus_project_RFsku,str);
+	printk("asus_project_RFsku = %s\n ", asus_project_RFsku);
+
+    return 0;
+}
+__setup("PRJ_RF=", get_prj_RFsku);
+//--- ASUS_BSP :  Add for asus_project_RFsku
+
+//+++ ASUS_BSP :  Add for asus_project_ADAPTER_ID @Ben
+int asus_project_ADAPTER_ID = 0;
+EXPORT_SYMBOL(asus_project_ADAPTER_ID);
+
+static int get_prj_ADAPTERid(char *str)
+{
+	printk("asus_project_ADAPTER_ID = %s\n ", str);
+
+	if( strcmp("1", str) == 0 )
+	        asus_project_ADAPTER_ID	= 1;
+        else
+                asus_project_ADAPTER_ID = 0;
+    return 0;
+}
+__setup("PRJ_ADAPTER=", get_prj_ADAPTERid);
+//--- ASUS_BSP :  Add for asus_project_ADAPTER_ID_
+
+//+++ ASUS_BSP :  Add for asus_project_lte @wigman_sun
+char asus_project_lte[2] = {0};
+EXPORT_SYMBOL(asus_project_lte);
+
+static int get_prj_id_kl(char *str)
+{
+	strcpy(asus_project_lte,str);
+	printk("asus_project_id_kl = %s\n ", asus_project_lte);
+
+    return 0;
+}
+__setup("PRJ_KL=", get_prj_id_kl);
+//--- ASUS_BSP :  Add for asus_project_lte
+
+//<ASUS-Lotta_Lu-20150317> Add for charger mode BuleScreen ++
+char boot_to_charger_mode[64] = {0};
+EXPORT_SYMBOL(boot_to_charger_mode);
+
+static int get_boot_charger(char *str)
+{
+	strncpy(boot_to_charger_mode, str, sizeof(boot_to_charger_mode));
+	printk("androidboot.mode=%s\n ", boot_to_charger_mode);
+
+    return 0;
+
+}
+__setup("androidboot.mode=", get_boot_charger);
+//<ASUS-Lotta_Lu-20150317> Add for charger mode BuleScreen --
+
 /*
  * If set, this is an indication to the drivers that reset the underlying
  * device before going ahead with the initialization otherwise driver might

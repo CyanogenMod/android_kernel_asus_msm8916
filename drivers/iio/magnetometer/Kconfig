@@ -55,4 +55,8 @@ config IIO_ST_MAGN_SPI_3AXIS
 	depends on IIO_ST_MAGN_3AXIS
 	depends on IIO_ST_SENSORS_SPI
 
+source "drivers/iio/magnetometer/inv_compass/Kconfig"
+
 endmenu
+
+

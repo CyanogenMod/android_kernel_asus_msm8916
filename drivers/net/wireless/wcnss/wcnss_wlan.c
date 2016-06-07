@@ -58,6 +58,9 @@
 #define IS_CAL_DATA_PRESENT     0
 #define WAIT_FOR_CBC_IND	2
 
+static char *wcnss_ready = NULL;
+module_param(wcnss_ready, charp, S_IRUGO | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+
 /* module params */
 #define WCNSS_CONFIG_UNSPECIFIED (-1)
 #define UINT32_MAX (0xFFFFFFFFU)
@@ -77,6 +80,10 @@ MODULE_PARM_DESC(has_autodetect_xo, "Perform auto detect to configure IRIS XO");
 static int do_not_cancel_vote = WCNSS_CONFIG_UNSPECIFIED;
 module_param(do_not_cancel_vote, int, S_IWUSR | S_IRUGO);
 MODULE_PARM_DESC(do_not_cancel_vote, "Do not cancel votes for wcnss");
+
+static char *wcnss_build_version = "unknown";
+module_param(wcnss_build_version, charp, S_IRUGO);
+MODULE_PARM_DESC(wcnss_build_version, "wcnss build version");
 
 static DEFINE_SPINLOCK(reg_spinlock);
 
@@ -251,7 +258,17 @@ static struct notifier_block wnb = {
 	.notifier_call = wcnss_notif_cb,
 };
 
-#define NVBIN_FILE "wlan/prima/WCNSS_qcom_wlan_nv.bin"
+static char *kernel_nvbin_ptr = NULL;
+#define WCNSS_ZE550KL_WLAN_NV_FILE               "wlan/prima/WCNSS_qcom_wlan_nv_ze550kl.bin"
+#define WCNSS_ZE550KL_CMCC_WLAN_NV_FILE          "wlan/prima/WCNSS_qcom_wlan_nv_ze550kl_cmcc.bin"
+#define WCNSS_ZE600KL_WLAN_NV_FILE               "wlan/prima/WCNSS_qcom_wlan_nv_ze600kl.bin"	//<asus-kevin>150325+
+#define WCNSS_ZX550KL_WLAN_NV_FILE               "wlan/prima/WCNSS_qcom_wlan_nv_zx550kl.bin"
+#define WCNSS_ZD550KL_CUCC_WLAN_NV_FILE          "wlan/prima/WCNSS_qcom_wlan_nv_cucc_zd550kl.bin"
+#define WCNSS_ZD550KL_CMCC_WLAN_NV_FILE           "wlan/prima/WCNSS_qcom_wlan_nv_cmcc_zd550kl.bin"
+#define WCNSS_ZE550KG_WLAN_NV_FILE		     "wlan/prima/WCNSS_qcom_wlan_nv_ze550kg.bin"
+#define WCNSS_ZE551KL_WLAN_NV_FILE               "wlan/prima/WCNSS_qcom_wlan_nv_ze551kl.bin"
+
+#define NVBIN_FILE              kernel_nvbin_ptr 
 
 /* On SMD channel 4K of maximum data can be transferred, including message
  * header, so NV fragment size as next multiple of 1Kb is 3Kb.
@@ -2217,6 +2234,9 @@ static void wcnssctrl_rx_handler(struct work_struct *worker)
 		}
 		build[len] = 0;
 		pr_info("wcnss: build version %s\n", build);
+		strncpy(wcnss_build_version, build, WCNSS_MAX_BUILD_VER_LEN);
+		wcnss_build_version[WCNSS_MAX_BUILD_VER_LEN] = '\0';
+
 		break;
 
 	case WCNSS_NVBIN_DNLD_RSP:
@@ -2334,6 +2354,33 @@ static void wcnss_nvbin_dnld(void)
 
 	down_read(&wcnss_pm_sem);
 
+	/* ze550kl and ze550kg have the same project id, but ze550kg only have 3G sku, and others belongs to ze550kl */
+	if( ASUS_ZE550KL == asus_PRJ_ID ){
+		/* RF SKU US:2 3G:3 TW:4 WW:5 CUCC:6 CMCC:7 */
+		if( 0 == strncmp(asus_project_RFsku, "3", 2))
+			NVBIN_FILE = WCNSS_ZE550KG_WLAN_NV_FILE;
+		else if( 0 == strncmp(asus_project_RFsku, "7", 2))
+			NVBIN_FILE = WCNSS_ZE550KL_CMCC_WLAN_NV_FILE;
+		/*ze551kl_US is LTE and FHD*/
+		else if((0 == strncmp(asus_project_lte, "1", 2))&&(0 == strncmp(asus_project_hd, "0", 2))&&( 0 == strncmp(asus_project_RFsku, "2", 2)))
+			NVBIN_FILE = WCNSS_ZE551KL_WLAN_NV_FILE;
+		else
+		 	NVBIN_FILE = WCNSS_ZE550KL_WLAN_NV_FILE;
+	}
+	else if( ASUS_ZE600KL == asus_PRJ_ID )
+		 	NVBIN_FILE = WCNSS_ZE600KL_WLAN_NV_FILE;
+
+	else if( ASUS_ZX550KL == asus_PRJ_ID )
+		NVBIN_FILE = WCNSS_ZX550KL_WLAN_NV_FILE;
+
+	else if( ASUS_ZD550KL == asus_PRJ_ID) {
+	    if( 0 == strncmp(asus_project_RFsku, "7", 2))
+		NVBIN_FILE = WCNSS_ZD550KL_CMCC_WLAN_NV_FILE;
+	    else
+		NVBIN_FILE = WCNSS_ZD550KL_CUCC_WLAN_NV_FILE;
+	}
+
+	pr_info("NVBIN_FILE is %s\n",NVBIN_FILE);
 	ret = request_firmware(&nv, NVBIN_FILE, dev);
 
 	if (ret || !nv || !nv->data || !nv->size) {
@@ -3255,6 +3302,10 @@ static int wcnss_notif_cb(struct notifier_block *this, unsigned long code,
 			msleep(20);
 			wcnss_wlan_power(&pdev->dev, pwlanconfig,
 					WCNSS_WLAN_SWITCH_OFF, NULL);
+			pr_info("[wcnss]: Cancel APPS vote for Iris & WCNSS.\n");
+			sprintf((char *)(wcnss_ready), "1");
+			printk("[wcnss]: wcnss_ready=1.\n");
+			/*--------------------------------------------------*/
 		}
 	} else if ((code == SUBSYS_BEFORE_SHUTDOWN && data && data->crashed) ||
 			code == SUBSYS_SOC_RESET) {
@@ -3391,6 +3442,23 @@ static int __init wcnss_wlan_init(void)
 	platform_driver_register(&wcnss_ctrl_driver);
 	register_pm_notifier(&wcnss_pm_notifier);
 
+	/*--------------------------------------------------*/
+	wcnss_ready = (char *) kmalloc(32, GFP_KERNEL);
+	if( wcnss_ready == NULL ) {
+		printk("[wcnss]: wcnss_ready, malloc(32) fail.\n");
+	}
+	else {
+		memset( wcnss_ready, 0, 32 );
+	}
+
+	wcnss_build_version = (char *) kmalloc(WCNSS_MAX_BUILD_VER_LEN+1, GFP_KERNEL);
+	if( wcnss_build_version == NULL )
+		printk("[wcnss]: wcnss_build_version, kmalloc fail.\n");
+	else
+		memset( wcnss_build_version, 0, WCNSS_MAX_BUILD_VER_LEN+1 );
+	/*--------------------------------------------------*/
+
+	pr_info("[wcnss]: wcnss_wlan_init -.\n");
 	return 0;
 }
 

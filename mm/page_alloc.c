@@ -806,7 +806,7 @@ bool is_cma_pageblock(struct page *page)
 {
 	return get_pageblock_migratetype(page) == MIGRATE_CMA;
 }
-
+EXPORT_SYMBOL(is_cma_pageblock);
 /* Free whole pageblock and set it's migration type to MIGRATE_CMA. */
 void __init init_cma_reserved_pageblock(struct page *page)
 {
@@ -5528,20 +5528,30 @@ static void __setup_per_zone_wmarks(void)
 			unsigned long min_pages;
 
 			min_pages = zone->managed_pages / 1024;
+			printk("min_pages = %lu,SWAP_CLUSTER_MAX = %lu\n",
+					min_pages, SWAP_CLUSTER_MAX);
 			min_pages = clamp(min_pages, SWAP_CLUSTER_MAX, 128UL);
 			zone->watermark[WMARK_MIN] = min_pages;
+			printk("zone->watermark[WMARK_MIN]1 = %d\n",
+					(unsigned int)zone->watermark[WMARK_MIN]);
 		} else {
 			/*
 			 * If it's a lowmem zone, reserve a number of pages
 			 * proportionate to the zone's size.
 			 */
 			zone->watermark[WMARK_MIN] = min;
+			printk("zone->watermark[WMARK_MIN]2 = %d\n",
+					(unsigned int)zone->watermark[WMARK_MIN]);
 		}
 
 		zone->watermark[WMARK_LOW]  = min_wmark_pages(zone) +
 					low + (min >> 2);
 		zone->watermark[WMARK_HIGH] = min_wmark_pages(zone) +
 					low + (min >> 1);
+		printk("zone->watermark[WMARK_LOW] = %d\n",
+				(unsigned int)zone->watermark[WMARK_LOW]);
+		printk("zone->watermark[WMARK_HIGH] = %d\n",
+				(unsigned int)zone->watermark[WMARK_HIGH]);
 
 		setup_zone_migrate_reserve(zone);
 		spin_unlock_irqrestore(&zone->lock, flags);

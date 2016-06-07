@@ -222,7 +222,7 @@ void dump_stack(void)
 #else
 void dump_stack(void) {}
 #endif
-
+EXPORT_SYMBOL(dump_stack);
 void get_term_dimensions(struct winsize *ws)
 {
 	char *s = getenv("LINES");

@@ -14,6 +14,10 @@
 #include <linux/dynamic_debug.h>
 #include <asm/byteorder.h>
 #include <uapi/linux/kernel.h>
+#include <linux/asusdebug.h>
+//++++ sean_lu@asus.com add "support laser sensor 2nd source"
+extern int g_ASUS_laserID;
+//---- sean_lu@asus.com add "support laser sensor 2nd source"
 
 #define USHRT_MAX	((u16)(~0U))
 #define SHRT_MAX	((s16)(USHRT_MAX>>1))
@@ -478,6 +482,29 @@ enum ftrace_dump_mode {
 	DUMP_ALL,
 	DUMP_ORIG,
 };
+
+extern int asus_PRJ_ID;
+extern char asus_project_RFsku[2];
+extern char asus_project_lte[2];
+extern char asus_project_stage[2];
+extern char asus_project_mem[4];
+extern char asus_project_hd[2];
+
+
+enum project_pcbid {
+	ASUS_ZE550KL,
+	ASUS_ZE600KL,
+	ASUS_ZX550KL,
+	ASUS_ZD550KL,
+};
+
+enum project_stage {
+	ASUS_SR1 = 7,
+	ASUS_SR2 = 6,
+	ASUS_ER = 5,
+};
+
+
 
 #ifdef CONFIG_TRACING
 void tracing_on(void);

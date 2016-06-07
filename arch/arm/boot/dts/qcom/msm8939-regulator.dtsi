@@ -52,9 +52,9 @@
 	spk_vreg: regulator_spk {
 		compatible = "regulator-fixed";
 		regulator-name = "spk_vreg";
-		startup-delay-us = <0>;
+		/*startup-delay-us = <0>;
 		enable-active-high;
-		gpio = <&msm_gpio 121 0>;
+		gpio = <&msm_gpio 121 0>;*/
 	};
 
 	mem_acc_vreg_corner: regulator@1942130 {

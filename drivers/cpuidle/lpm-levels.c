@@ -254,6 +254,9 @@ static int cpu_power_select(struct cpuidle_device *dev,
 	if (!cpu)
 		return -EINVAL;
 
+	if (dev->states_usage[0].performance_mode)
+		return 0;
+
 	if (sleep_disabled)
 		return 0;
 

@@ -103,6 +103,15 @@
 #define MDSS_MDP_HW_REV_110	MDSS_MDP_REV(1, 10, 0) /* 8992 v1.0 */
 #define MDSS_MDP_HW_REV_200	MDSS_MDP_REV(2, 0, 0) /* 8092 v1.0 */
 
+//ASUS_BSP: Wigman, cabc mode +++
+enum {
+       OFF_MODE = 0x0,
+       UI_MODE,
+       Still_MODE,
+       Moving_MODE,
+};
+//ASUS_BSP: Wigman, cabc mode ---
+
 enum {
 	NOTIFY_UPDATE_INIT,
 	NOTIFY_UPDATE_DEINIT,

@@ -25,6 +25,7 @@
 #include <linux/log2.h>
 #include <linux/qpnp/power-on.h>
 
+ulong *printk_buffer_slot2_addr;
 #define CREATE_MASK(NUM_BITS, POS) \
 	((unsigned char) (((1 << (NUM_BITS)) - 1) << (POS)))
 #define PON_MASK(MSB_BIT, LSB_BIT) \
@@ -548,6 +549,157 @@ qpnp_get_cfg(struct qpnp_pon *pon, u32 pon_type)
 
 	return NULL;
 }
+/* ASUS_BSP + [ASDF]long press power key 6sec,reset device.. ++ */
+static struct qpnp_pon *pon_for_powerkey;
+static bool is_holding_power_key(void)
+{
+	int rc;
+	u8 pon_rt_sts = 0;
+	struct qpnp_pon *pon = pon_for_powerkey;
+
+	if (pon_for_powerkey == NULL) {
+		printk("%s: Error:pon_for_powerkey is NULL\n", __func__);
+		return false;
+	}
+	/* check the RT status to get the current status of the line */
+	rc = spmi_ext_register_readl(pon->spmi->ctrl, pon->spmi->sid,
+				QPNP_PON_RT_STS(pon->base), &pon_rt_sts, 1);
+	if (rc) {
+		dev_err(&pon->spmi->dev, "Failed to read PON RT status\n");
+		return false;
+	}
+
+	return pon_rt_sts & 1;
+}
+
+#include <linux/reboot.h>
+#include <linux/asus_global.h>
+#include <asm/uaccess.h>
+#include <linux/fs.h>
+#define DEV_VIBRATOR "/sys/class/timed_output/vibrator/enable"
+extern struct _asus_global asus_global;
+void set_vib_enable(int value)
+{
+	char timeout_ms[5];
+	static mm_segment_t oldfs;
+	struct file *fp = NULL;
+	loff_t pos_lsts = 0;
+
+	sprintf(timeout_ms, "%d", value);
+	oldfs = get_fs();
+	set_fs(KERNEL_DS);
+	fp = filp_open( DEV_VIBRATOR, O_RDWR|O_CREAT|O_TRUNC, 0664 );
+	if (IS_ERR_OR_NULL(fp)) {
+		printk("ASDF: fail to open vibrator.");
+		return;
+	}
+	if (fp->f_op != NULL && fp->f_op->write != NULL) {
+		pos_lsts = 0;
+		fp->f_op->write(fp, timeout_ms, strlen(timeout_ms), &pos_lsts);
+	} else {
+		printk("ASDF: fail to write value.\n");
+	}
+	filp_close(fp, NULL);
+	set_fs(oldfs);
+	printk("ASDF: set vibrator enable. (%s ms)\n", timeout_ms);
+}
+
+#define TIMEOUT_COUNT 55
+static struct work_struct __wait_for_power_key_6s_work;
+static unsigned long press_time;
+static int slow_ok;
+void wait_for_power_key_6s_work(struct work_struct *work)
+{
+	static int power_key_6s_running = 0;
+	int i, duration;
+	unsigned long timeout, startime;
+	printk_buffer_slot2_addr = (ulong *)PRINTK_BUFFER_SLOT2;
+	*printk_buffer_slot2_addr = (ulong)PRINTK_BUFFER_MAGIC;
+	printk(KERN_EMERG "%s \n",__func__);
+
+	if (!power_key_6s_running) {
+		if (!is_holding_power_key()) {
+			return;
+		}
+		power_key_6s_running = 1;
+		startime = press_time;
+		timeout = startime + HZ*TIMEOUT_COUNT/10;
+		for (i = 0, slow_ok = 0; i < TIMEOUT_COUNT && slow_ok == 0 &&
+				time_before(jiffies, timeout) ; i++) {
+			if (is_holding_power_key()) {
+				msleep(100);
+			} else {
+				break;
+			}
+		}
+
+		if (((i == TIMEOUT_COUNT) || (slow_ok == 1) ||
+				time_after_eq(jiffies, timeout)) &&
+				(is_holding_power_key()) && (i > 0)) {
+			duration = (jiffies - startime)*10/HZ;
+			//ASUSEvtlog("ASDF: reset device after power press %d.%d sec (%d)\n",
+			//		duration/10, duration%10, i);
+			set_vib_enable(200);
+			msleep(200);
+
+			asus_global.ramdump_enable_magic = 0;
+			printk(KERN_CRIT "asus_global.ramdump_enable_magic = 0x%x\n",
+					asus_global.ramdump_enable_magic);
+			printk("force reset device!!\n");
+			kernel_restart("asdf");
+		}
+
+		power_key_6s_running = 0;
+	}
+}
+/* ASUS_BSP + [ASDF]long press power key 6sec,reset device.. -- */
+
+#define TIMEOUT_SLOW 30
+static struct work_struct __wait_for_slowlog_work;
+extern int boot_after_60sec;
+void wait_for_slowlog_work(struct work_struct *work)
+{
+	static int one_slowlog_instance_running = 0;
+	int i, duration;
+	unsigned long timeout, startime;
+
+	if (!one_slowlog_instance_running) {
+		if (!is_holding_power_key()) {
+			return;
+		}
+		one_slowlog_instance_running = 1;
+		startime = press_time;
+		timeout = startime + HZ*TIMEOUT_SLOW/10;
+		slow_ok = 0;
+		for (i = 0; i < TIMEOUT_SLOW && time_before(jiffies, timeout);
+				i++) {
+			if(is_holding_power_key()) {
+				msleep(100);
+			}
+			else
+				break;
+		}
+
+		if(((i == TIMEOUT_SLOW) || time_after_eq(jiffies, timeout)) &&
+				(is_holding_power_key()) && (i > 0)) {
+			printk("start to gi chk\n");
+			duration = (jiffies - startime)*10/HZ;
+			printk("start to gi chk after power press %d.%d sec (%d)\n",
+					duration/10, duration%10, i);
+			save_all_thread_info();
+
+			msleep(1 * 1000);
+
+			duration = (jiffies - startime)*10/HZ;
+			printk("start to gi delta after power press %d.%d sec (%d)\n",
+					duration/10, duration%10, i);
+			delta_all_thread_info();
+			save_phone_hang_log();
+			slow_ok = 1;
+		}
+		one_slowlog_instance_running = 0;
+	}
+}
 
 static int
 qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
@@ -575,7 +727,23 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 
 	switch (cfg->pon_type) {
 	case PON_KPDPWR:
+		if (is_holding_power_key())
+			dev_err(&pon->spmi->dev, "Power key down\n");
+		else
+			dev_err(&pon->spmi->dev, "Power key on\n");
+
 		pon_rt_bit = QPNP_PON_KPDPWR_N_SET;
+		/* for phone hang debug */
+		pon_for_powerkey = pon;
+		if (boot_after_60sec) {
+			if (is_holding_power_key()) {
+				press_time = jiffies;
+				schedule_work(&__wait_for_slowlog_work);
+				schedule_work(&__wait_for_power_key_6s_work);
+			} else {
+				press_time = 0xFFFFFFFF;
+			}
+		}
 		break;
 	case PON_RESIN:
 		pon_rt_bit = QPNP_PON_RESIN_N_SET;
@@ -1547,12 +1715,14 @@ static int qpnp_pon_probe(struct spmi_device *spmi)
 		dev_info(&pon->spmi->dev,
 			"PMIC@SID%d Power-on reason: Unknown and '%s' boot\n",
 			pon->spmi->sid, cold_boot ? "cold" : "warm");
+		ASUSEvtlog("Bootup Reason: Unknown and '%s' boot\n", cold_boot ? "cold" : "warm");
 	} else {
 		pon->pon_trigger_reason = index;
 		dev_info(&pon->spmi->dev,
 			"PMIC@SID%d Power-on reason: %s and '%s' boot\n",
 			pon->spmi->sid, qpnp_pon_reason[index],
 			cold_boot ? "cold" : "warm");
+		ASUSEvtlog("Bootup Reason: %s and '%s' boot\n", qpnp_pon_reason[index], cold_boot ? "cold" : "warm");
 	}
 
 	/* POFF reason */
@@ -1718,6 +1888,11 @@ static struct spmi_driver qpnp_pon_driver = {
 
 static int __init qpnp_pon_init(void)
 {
+	/* ASUS_BSP : [ASDF] long press power key 3sec, to save slow log */
+	INIT_WORK(&__wait_for_slowlog_work, wait_for_slowlog_work);
+	/* ASUS_BSP : [ASDF] long press power key 6sec,reset device */
+	INIT_WORK(&__wait_for_power_key_6s_work, wait_for_power_key_6s_work);
+
 	return spmi_driver_register(&qpnp_pon_driver);
 }
 module_init(qpnp_pon_init);

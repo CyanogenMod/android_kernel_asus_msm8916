@@ -3772,10 +3772,12 @@ static void interrupt_mode_init(void)
 {
 	if (!msm_thermal_probed) {
 		interrupt_mode_enable = true;
+		printk("msm_thermal_probed=false\n");
 		return;
 	}
-	if (polling_enabled) {
-		pr_info("Interrupt mode init\n");
+	//if (polling_enabled) {
+	//	pr_info("Interrupt mode init\n");
+		printk("Interrupt mode init\n");
 		polling_enabled = 0;
 		disable_msm_thermal();
 		hotplug_init();
@@ -3783,7 +3785,7 @@ static void interrupt_mode_init(void)
 		thermal_monitor_init();
 		msm_thermal_add_cx_nodes();
 		msm_thermal_add_gfx_nodes();
-	}
+	//}
 }
 
 static int __ref set_enabled(const char *val, const struct kernel_param *kp)

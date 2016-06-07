@@ -1,2116 +1,2704 @@
-/* Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
+/*
+ * This file is part of the AP3426, AP3212C and AP3216C sensor driver.
+ * AP3426 is combined proximity and ambient light sensor.
+ * AP3216C is combined proximity, ambient light sensor and IRLED.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
+ * Contact: John Huang <john.huang@dyna-image.com>
+ *	    Templeton Tsai <templeton.tsai@dyna-image.com>
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+ * 02110-1301 USA
+ *
+ *
+ * Filename: ap3426.c
+ *
+ * Summary:
+ *	AP3426 device driver.
+ *
+ * Modification History:
+ * Date     By       Summary
+ * -------- -------- -------------------------------------------------------
+ * 02/02/12 YC       1. Modify irq function to seperate two interrupt routine. 
+ *					 2. Fix the index of reg array error in em write. 
+ * 02/22/12 YC       3. Merge AP3426 and AP3216C into the same driver. (ver 1.8)
+ * 03/01/12 YC       Add AP3212C into the driver. (ver 1.8)
+ * 07/25/14 John	  Ver.2.1 , ported for Nexus 7
+ * 08/21/14 Templeton AP3426 Ver 1.0, ported for Nexus 7
  */
 
-#include <linux/kernel.h>
-#include <linux/init.h>
 #include <linux/module.h>
+#include <linux/init.h>
 #include <linux/slab.h>
-#include <linux/jiffies.h>
 #include <linux/i2c.h>
-#include <linux/i2c-dev.h>
-#include <linux/miscdevice.h>
 #include <linux/mutex.h>
-#include <linux/mm.h>
-#include <linux/device.h>
-#include <linux/fs.h>
 #include <linux/delay.h>
-#include <linux/sysctl.h>
-#include <linux/regulator/consumer.h>
-#include <linux/input.h>
-#include <linux/regmap.h>
-#include <linux/gpio.h>
-#include <linux/of_gpio.h>
 #include <linux/interrupt.h>
-#include <linux/sensors.h>
-#include <linux/pm_wakeup.h>
-#include <linux/uaccess.h>
-#include <linux/atomic.h>
+#include <linux/input.h>
+#include <linux/string.h>
+#include <linux/gpio.h>
+#include <linux/miscdevice.h>
+#include <asm/uaccess.h>
+#ifdef CONFIG_HAS_EARLYSUSPEND
+#include <linux/earlysuspend.h>
+#endif
+#include <linux/workqueue.h>
+#include <linux/timer.h>
+#include <linux/ap3426.h>
+#include <linux/slab.h>
+#include <linux/of_gpio.h>
+#include <linux/hrtimer.h>
+#include <linux/regulator/consumer.h>
+#include <linux/proc_fs.h>
+#include <linux/wakelock.h>
+#define AP3426_DRV_NAME		"ap3426"
+#define DRIVER_VERSION		"1"
+#define CONFIG_ASUS_FACTORY_SENSOR_MODE  1
 
-#define AP3426_I2C_NAME			"ap3426"
-#define AP3426_LIGHT_INPUT_NAME		"ap3426-light"
-#define AP3426_PROXIMITY_INPUT_NAME	"ap3426-proximity"
+#define PL_TIMER_DELAY 10
+#define INTERRUPT_MODE
+//#define HR_TIMER
 
-/* AP3426 registers */
-#define AP3426_REG_CONFIG		0x00
-#define AP3426_REG_INT_FLAG		0x01
-#define AP3426_REG_INT_CTL		0x02
-#define AP3426_REG_WAIT_TIME		0x06
-#define AP3426_REG_IR_DATA_LOW		0x0A
-#define AP3426_REG_IR_DATA_HIGH		0x0B
-#define AP3426_REG_ALS_DATA_LOW		0x0C
-#define AP3426_REG_ALS_DATA_HIGH	0x0D
-#define AP3426_REG_PS_DATA_LOW		0x0E
-#define AP3426_REG_PS_DATA_HIGH		0x0F
-#define AP3426_REG_ALS_GAIN		0x10
-#define AP3426_REG_ALS_PERSIST		0x14
-#define AP3426_REG_ALS_LOW_THRES_0	0x1A
-#define AP3426_REG_ALS_LOW_THRES_1	0x1B
-#define AP3426_REG_ALS_HIGH_THRES_0	0x1C
-#define AP3426_REG_ALS_HIGH_THRES_1	0x1D
-#define AP3426_REG_PS_GAIN		0x20
-#define AP3426_REG_PS_LED_DRIVER	0x21
-#define AP3426_REG_PS_INT_FORM		0x22
-#define AP3426_REG_PS_MEAN_TIME		0x23
-#define AP3426_REG_PS_SMART_INT		0x24
-#define AP3426_REG_PS_INT_TIME		0x25
-#define AP3426_REG_PS_PERSIST		0x26
-#define AP3426_REG_PS_CAL_L		0x28
-#define AP3426_REG_PS_CAL_H		0x29
-#define AP3426_REG_PS_LOW_THRES_0	0x2A
-#define AP3426_REG_PS_LOW_THRES_1	0x2B
-#define AP3426_REG_PS_HIGH_THRES_0	0x2C
-#define AP3426_REG_PS_HIGH_THRES_1	0x2D
+/* POWER SUPPLY VOLTAGE RANGE */
+#define AP3426_VDD_MIN_UV	2700000
+#define AP3426_VDD_MAX_UV	3300000
+#define AP3426_VI2C_MIN_UV	1750000
+#define AP3426_VI2C_MAX_UV	1950000
+//#define LSC_DBG
+#define Driverversion  "1.0.0"  //<ASUS-annacheng20150129+>
+#define VENDOR  "AP3426"    
 
-#define AP3426_REG_MAGIC		0xFF
-#define AP3426_REG_COUNT		0x2E
-
-#define AP3426_ALS_INT_MASK		0x01
-#define AP3426_PS_INT_MASK		0x02
-
-#define ALS_GAIN_SWITCH_RATIO		80
-
-/* AP3426 ALS data is 16 bit */
-#define ALS_DATA_MASK		0xffff
-#define ALS_LOW_BYTE(data)	((data) & 0xff)
-#define ALS_HIGH_BYTE(data)	(((data) >> 8) & 0xff)
-
-/* AP3426 PS data is 10 bit */
-#define PS_DATA_MASK		0x3ff
-#define PS_LOW_BYTE(data)	((data) & 0xff)
-#define PS_HIGH_BYTE(data)	(((data) >> 8) & 0x3)
-
-/* default als sensitivity in lux */
-#define AP3426_ALS_SENSITIVITY		50
-
-/* AP3426 takes at least 10ms to boot up */
-#define AP3426_BOOT_TIME_MS		12
-
-#define AP3426_CALIBRATE_SAMPLES	15
-/* als and ps interrupt enabled, clear by software */
-#define AP3426_INT_CONFIG		0x89
-
-/* Any proximity distance change will wakeup SoC */
-#define AP3426_WAKEUP_ANY_CHANGE	0xff
-
-#define CAL_BUF_LEN			16
-
-enum {
-	CMD_WRITE = 0,
-	CMD_READ = 1,
-};
-
-struct regulator_map {
-	struct regulator	*regulator;
-	int			min_uv;
-	int			max_uv;
-	char			*supply;
-};
-
-struct pinctrl_config {
-	struct pinctrl		*pinctrl;
-	struct pinctrl_state	*state[2];
-	char			*name[2];
-};
-
+#ifdef LSC_DBG
+#define LDBG(s,args...)	{printk("LDBG: func [%s], line [%d], ",__func__,__LINE__); printk(s,## args);}
+#else
+#define LDBG(s,args...) {}
+#endif
+static void plsensor_work_handler(struct work_struct *w);
+#ifndef INTERRUPT_MODE
+    #ifdef HR_TIMER
+        #define MS_TO_NS(x) (x * 1E6L)
+        static struct hrtimer hr_timer;
+        static enum hrtimer_restart ap3426_hrtimer_callback( struct hrtimer *timer );
+        ktime_t ktime;
+    #endif
+static void pl_timer_callback(unsigned long pl_data);
+#endif
+static int ap3426_probe_fail = 1; // <asus-olaf20151005+>
 struct ap3426_data {
-	struct i2c_client	*i2c;
-	struct regmap		*regmap;
-	struct regulator	*config;
-	struct input_dev	*input_light;
-	struct input_dev	*input_proximity;
-	struct workqueue_struct	*workqueue;
-
-	struct sensors_classdev	als_cdev;
-	struct sensors_classdev	ps_cdev;
-	struct mutex		ops_lock;
-	struct work_struct	report_work;
-	struct work_struct	als_enable_work;
-	struct work_struct	als_disable_work;
-	struct work_struct	ps_enable_work;
-	struct work_struct	ps_disable_work;
-	atomic_t		wake_count;
-
-	int			irq_gpio;
-	int			irq;
-	bool			als_enabled;
-	bool			ps_enabled;
-	u32			irq_flags;
-	unsigned int		als_delay;
-	unsigned int		ps_delay;
-	int			als_cal;
-	int			ps_cal;
-	int			als_gain;
-	int			als_persist;
-	int			ps_gain;
-	int			ps_persist;
-	int			ps_led_driver;
-	int			ps_mean_time;
-	int			ps_integrated_time;
-	int			ps_wakeup_threshold;
-
-	int			last_als;
-	int			last_ps;
-	int			flush_count;
-	int			power_enabled;
-
-	unsigned int		reg_addr;
-	char			calibrate_buf[CAL_BUF_LEN];
-	unsigned int		bias;
+    struct i2c_client *client;
+    u8 reg_cache[AP3426_NUM_CACHABLE_REGS];//TO-DO
+    u8 power_state_before_suspend;
+    int irq;
+   int hsensor_enable;
+    int old_mode;
+   struct class *AP3426_class;
+    struct device *ps_dev;
+	int  gpioNum;
+    struct regulator *vdd;
+    struct regulator *vio;
+    struct wake_lock ps_wake_lock;
+    struct input_dev	*psensor_input_dev;
+    struct input_dev	*lsensor_input_dev;
+    struct input_dev	*hsensor_input_dev;
+    struct workqueue_struct *plsensor_wq;
+    struct work_struct plsensor_work;
+#ifndef INTERRUPT_MODE
+    struct timer_list pl_timer;
+#endif
+    int ps_opened;
+	int ls_opened;
+	uint8_t psensor_sleep_becuz_suspend;
+	uint8_t lsensor_sleep_becuz_early_suspend;
+	int once_ps_opened;
+	int once_ls_opened;
+	int last_initial_report_lux;
+	uint8_t status_calling;
 };
+static DECLARE_WORK(ap3426_irq_work, plsensor_work_handler);
 
-static struct regulator_map power_config[] = {
-	{.supply = "vdd", .min_uv = 2000000, .max_uv = 3300000, },
-	{.supply = "vio", .min_uv = 1750000, .max_uv = 1950000, },
-};
+ //<ASUS-annacheng20150129+>>>>+
+struct proc_dir_entry *ap3426_lightsensor_entry = NULL;
+struct proc_dir_entry *ap3426_proximitysensor_entry = NULL;
+ //<ASUS-annacheng20150129+><<<<<+
+ 
+static struct ap3426_data *private_pl_data = NULL;
+// AP3426 register
+static u8 ap3426_reg[AP3426_NUM_CACHABLE_REGS] = 
+{0x00,0x01,0x02,0x06,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F,
+    0x10,0x1A,0x1B,0x1C,0x1D,
+    0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x28,0x29,0x2A,0x2B,0x2C,0x2D};
 
-static struct pinctrl_config pin_config = {
-	.name = { "default", "sleep" },
-};
+// AP3426 range
+static int ap3426_range[4] = {34304,8576,2144,536};
 
-static int gain_table[] = { 32768, 8192, 2048, 512 };
-/* within 2% percent of jitter will trigger interrupt */
-static int sensitivity_table[] = { 3000, 400, 100, 1 };
-static int pmt_table[] = { 5, 10, 14, 19 }; /* 5.0 9.6, 14.1 18.7 */
 
-/* PS distance table */
-static int ps_distance_table[] = { 887, 282, 111, 78, 53, 46, };
+//static u16 ap3426_threshole[8] = {28,444,625,888,1778,3555,7222,0xffff};
+static u16 ap3426_threshole[10] = {100,220,444,888,1788,3555,7222,19555,35555,0xffff};
+static u8 *reg_array;
+static int *range;
+static int reg_num = 0;
 
-static struct sensors_classdev als_cdev = {
-	.name = "ap3426-light",
-	.vendor = "Dyna Image Corporation",
-	.version = 1,
-	.handle = SENSORS_LIGHT_HANDLE,
-	.type = SENSOR_TYPE_LIGHT,
-	.max_range = "655360",
-	.resolution = "1.0",
-	.sensor_power = "0.35",
-	.min_delay = 100000,
-	.max_delay = 1375,
-	.fifo_reserved_event_count = 0,
-	.fifo_max_event_count = 0,
-	.flags = 2,
-	.enabled = 0,
-	.delay_msec = 50,
-	.sensors_enable = NULL,
-	.sensors_poll_delay = NULL,
-	.sensors_calibrate = NULL,
-	.sensors_write_cal_params = NULL,
-	.params = NULL,
-};
+static int cali = 100;
+static int misc_ps_opened = 0;
+static int misc_ls_opened = 0;
+static int proximity_state = 1;
+static DEFINE_MUTEX(ap3426_lock);
+static DEFINE_MUTEX(ap3426_ls_lock);
+static DEFINE_MUTEX(ap3426_ps_lock);
+static DEFINE_MUTEX(ap3426_heartbeat_lock);
 
-static struct sensors_classdev ps_cdev = {
-	.name = "ap3426-proximity",
-	.vendor = "Dyna Image Corporation",
-	.version = 1,
-	.handle = SENSORS_PROXIMITY_HANDLE,
-	.type = SENSOR_TYPE_PROXIMITY,
-	.max_range = "6",
-	.resolution = "1.0",
-	.sensor_power = "0.35",
-	.min_delay = 5000,
-	.max_delay = 1280,
-	.fifo_reserved_event_count = 0,
-	.fifo_max_event_count = 0,
-	.flags = 3,
-	.enabled = 0,
-	.delay_msec = 50,
-	.sensors_enable = NULL,
-	.sensors_poll_delay = NULL,
-	.sensors_calibrate = NULL,
-	.sensors_write_cal_params = NULL,
-	.params = NULL,
-};
-
-static int sensor_power_init(struct device *dev, struct regulator_map *map,
-		int size)
-{
-	int rc;
-	int i;
-
-	for (i = 0; i < size; i++) {
-		map[i].regulator = devm_regulator_get(dev, map[i].supply);
-		if (IS_ERR(map[i].regulator)) {
-			rc = PTR_ERR(map[i].regulator);
-			dev_err(dev, "Regualtor get failed vdd rc=%d\n", rc);
-			goto exit;
-		}
-		if (regulator_count_voltages(map[i].regulator) > 0) {
-			rc = regulator_set_voltage(map[i].regulator,
-					map[i].min_uv, map[i].max_uv);
-			if (rc) {
-				dev_err(dev, "Regulator set failed vdd rc=%d\n",
-						rc);
-				goto exit;
-			}
-		}
-	}
-
-	return 0;
-
-exit:
-	/* Regulator not set correctly */
-	for (i = i - 1; i >= 0; i--) {
-		if (regulator_count_voltages(map[i].regulator))
-			regulator_set_voltage(map[i].regulator, 0,
-					map[i].max_uv);
-	}
-
-	return rc;
+#define ADD_TO_IDX(addr,idx)	{														\
+    int i;												\
+    for(i = 0; i < reg_num; i++)						\
+    {													\
+	if (addr == reg_array[i])						\
+	{												\
+	    idx = i;									\
+	    break;										\
+	}												\
+    }													\
 }
 
-static int sensor_power_deinit(struct device *dev, struct regulator_map *map,
-		int size)
-{
-	int i;
-
-	for (i = 0; i < size; i++) {
-		if (!IS_ERR_OR_NULL(map[i].regulator)) {
-			if (regulator_count_voltages(map[i].regulator) > 0)
-				regulator_set_voltage(map[i].regulator, 0,
-						map[i].max_uv);
-		}
-	}
-
-	return 0;
-}
-
-static int sensor_power_config(struct device *dev, struct regulator_map *map,
-		int size, bool enable)
-{
-	int i;
-	int rc = 0;
-
-	if (enable) {
-		for (i = 0; i < size; i++) {
-			rc = regulator_enable(map[i].regulator);
-			if (rc) {
-				dev_err(dev, "enable %s failed.\n",
-						map[i].supply);
-				goto exit_enable;
-			}
-		}
-	} else {
-		for (i = 0; i < size; i++) {
-			rc = regulator_disable(map[i].regulator);
-			if (rc) {
-				dev_err(dev, "disable %s failed.\n",
-						map[i].supply);
-				goto exit_disable;
-			}
-		}
-	}
-
-	return 0;
-
-exit_enable:
-	for (i = i - 1; i >= 0; i--)
-		regulator_disable(map[i].regulator);
-
-	return rc;
-
-exit_disable:
-	for (i = i - 1; i >= 0; i--)
-		if (regulator_enable(map[i].regulator))
-			dev_err(dev, "enable %s failed\n", map[i].supply);
-
-	return rc;
-}
-
-static int sensor_pinctrl_init(struct device *dev,
-		struct pinctrl_config *config)
-{
-	config->pinctrl = devm_pinctrl_get(dev);
-	if (IS_ERR_OR_NULL(config->pinctrl)) {
-		dev_err(dev, "Failed to get pinctrl\n");
-		return PTR_ERR(config->pinctrl);
-	}
-
-	config->state[0] =
-		pinctrl_lookup_state(config->pinctrl, config->name[0]);
-	if (IS_ERR_OR_NULL(config->state[0])) {
-		dev_err(dev, "Failed to look up default state\n");
-		return PTR_ERR(config->state[0]);
-	}
-
-	config->state[1] =
-		pinctrl_lookup_state(config->pinctrl, config->name[1]);
-	if (IS_ERR_OR_NULL(config->state[1])) {
-		dev_err(dev, "Failed to look up default state\n");
-		return PTR_ERR(config->state[1]);
-	}
-
-	return 0;
-}
-
-static int ap3426_parse_dt(struct device *dev, struct ap3426_data *di)
-{
-	struct device_node *dp = dev->of_node;
-	int rc;
-	u32 value;
-	int i;
-
-	rc = of_get_named_gpio_flags(dp, "di,irq-gpio", 0,
-			&di->irq_flags);
-	if (rc < 0) {
-		dev_err(dev, "unable to read irq gpio\n");
-		return rc;
-	}
-
-	di->irq_gpio = rc;
-
-	rc = of_property_read_u32(dp, "di,als-cal", &value);
-	if (rc) {
-		dev_err(dev, "read di,als-cal failed\n");
-		return rc;
-	}
-	di->als_cal = value;
-
-	rc = of_property_read_u32(dp, "di,als-gain", &value);
-	if (rc) {
-		dev_err(dev, "read di,als-gain failed\n");
-		return rc;
-	}
-	if (value >= ARRAY_SIZE(gain_table)) {
-		dev_err(dev, "di,als-gain out of range\n");
-		return -EINVAL;
-	}
-	di->als_gain = value;
-
-	rc = of_property_read_u32(dp, "di,als-persist", &value);
-	if (rc) {
-		dev_err(dev, "read di,als-persist failed\n");
-		return rc;
-	}
-	if (value > 0x3f) { /* The maximum value is 63 conversion time. */
-		dev_err(dev, "di,als-persist out of range\n");
-		return -EINVAL;
-	}
-	di->als_persist = value;
-
-	rc = of_property_read_u32(dp, "di,ps-gain", &value);
-	if (rc) {
-		dev_err(dev, "read di,ps-gain failed\n");
-		return rc;
-	}
-	if (value > 0x03) { /* The maximum value is 3, stands for 8x gain. */
-		dev_err(dev, "proximity gain out of range\n");
-		return -EINVAL;
-	}
-	di->ps_gain = value;
-
-	rc = of_property_read_u32(dp, "di,ps-persist", &value);
-	if (rc) {
-		dev_err(dev, "read di,ps-persist failed\n");
-		return rc;
-	}
-	if (value > 0x3f) { /* The maximum value is 63 conversion time. */
-		dev_err(dev, "di,ps-persist out of range\n");
-		return -EINVAL;
-	}
-	di->ps_persist = value;
-
-	rc = of_property_read_u32(dp, "di,ps-led-driver", &value);
-	if (rc) {
-		dev_err(dev, "read di,ps-led-driver failed\n");
-		return rc;
-	}
-	if (value > 0x03) { /* The maximum value is 3, stands for 100% duty. */
-		dev_err(dev, "led driver out of range\n");
-		return -EINVAL;
-	}
-	di->ps_led_driver = value;
-
-	rc = of_property_read_u32(dp, "di,ps-mean-time", &value);
-	if (rc) {
-		dev_err(dev, "di,ps-mean-time incorrect\n");
-		return rc;
-	}
-	if (value >= ARRAY_SIZE(pmt_table)) {
-		dev_err(dev, "ps mean time out of range\n");
-		return -EINVAL;
-	}
-	di->ps_mean_time = value;
-
-	rc = of_property_read_u32(dp, "di,ps-integrated-time", &value);
-	if (rc) {
-		dev_err(dev, "read di,ps-intergrated-time failed\n");
-		return rc;
-	}
-	if (value > 0x3f) { /* The maximum value is 63. */
-		dev_err(dev, "ps integrated time out of range\n");
-		return -EINVAL;
-	}
-	di->ps_integrated_time = value;
-
-	rc = of_property_read_u32(dp, "di,wakeup-threshold", &value);
-	if (rc) {
-		dev_info(dev, "di,wakeup-threshold incorrect, drop to default\n");
-		value = AP3426_WAKEUP_ANY_CHANGE;
-	}
-	if ((value >= ARRAY_SIZE(ps_distance_table)) &&
-			(value != AP3426_WAKEUP_ANY_CHANGE)) {
-		dev_err(dev, "wakeup threshold too big\n");
-		return -EINVAL;
-	}
-	di->ps_wakeup_threshold = value;
-
-	rc = of_property_read_u32_array(dp, "di,als-sensitivity",
-			sensitivity_table, ARRAY_SIZE(sensitivity_table));
-	if (rc)
-		dev_info(dev, "read di,als-sensitivity failed. Drop to default\n");
-
-	rc = of_property_read_u32_array(dp, "di,ps-distance-table",
-			ps_distance_table, ARRAY_SIZE(ps_distance_table));
-	if ((rc == -ENODATA) || (rc == -EOVERFLOW)) {
-		dev_err(dev, "di,ps-distance-table is not correctly set\n");
-		return rc;
-	}
-
-	for (i = 1; i < ARRAY_SIZE(ps_distance_table); i++) {
-		if (ps_distance_table[i - 1] < ps_distance_table[i]) {
-			dev_err(dev, "ps distance table should in descend order\n");
-			return -EINVAL;
-		}
-	}
-
-	if (ps_distance_table[0] > PS_DATA_MASK) {
-		dev_err(dev, "distance table out of range\n");
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int ap3426_check_device(struct ap3426_data *di)
-{
-	unsigned int part_id;
-	int rc;
-
-	/* AP3426 don't have part id registers */
-	rc = regmap_read(di->regmap, AP3426_REG_CONFIG, &part_id);
-	if (rc) {
-		dev_err(&di->i2c->dev, "read reg %d failed.(%d)\n",
-				AP3426_REG_CONFIG, rc);
-		return rc;
-	}
-
-	dev_dbg(&di->i2c->dev, "register 0x%d:0x%x\n", AP3426_REG_CONFIG,
-			part_id);
-	return 0;
-}
-
-static int ap3426_init_input(struct ap3426_data *di)
-{
-	struct input_dev *input;
-	int status;
-
-	input = devm_input_allocate_device(&di->i2c->dev);
-	if (!input) {
-		dev_err(&di->i2c->dev, "allocate light input device failed\n");
-		return PTR_ERR(input);
-	}
-
-	input->name = AP3426_LIGHT_INPUT_NAME;
-	input->phys = "ap3426/input0";
-	input->id.bustype = BUS_I2C;
-
-	__set_bit(EV_ABS, input->evbit);
-	input_set_abs_params(input, ABS_MISC, 0, 655360, 0, 0);
-
-	status = input_register_device(input);
-	if (status) {
-		dev_err(&di->i2c->dev, "register light input device failed.\n");
-		return status;
-	}
-
-	di->input_light = input;
-
-	input = devm_input_allocate_device(&di->i2c->dev);
-	if (!input) {
-		dev_err(&di->i2c->dev, "allocate light input device failed\n");
-		return PTR_ERR(input);
-	}
-
-	input->name = AP3426_PROXIMITY_INPUT_NAME;
-	input->phys = "ap3426/input1";
-	input->id.bustype = BUS_I2C;
-
-	__set_bit(EV_ABS, input->evbit);
-	input_set_abs_params(input, ABS_DISTANCE, 0, 1023, 0, 0);
-
-	status = input_register_device(input);
-	if (status) {
-		dev_err(&di->i2c->dev, "register proxmity input device failed.\n");
-		return status;
-	}
-
-	di->input_proximity = input;
-
-	return 0;
-}
-
-static int ap3426_init_device(struct ap3426_data *di)
-{
-	int rc;
-
-	/* Enable als/ps interrupt and clear interrupt by software */
-	rc = regmap_write(di->regmap, AP3426_REG_INT_CTL, AP3426_INT_CONFIG);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d register failed\n",
-				AP3426_REG_INT_CTL);
-		return rc;
-	}
-
-	/* Set als gain */
-	rc = regmap_write(di->regmap, AP3426_REG_ALS_GAIN, di->als_gain << 4);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d register failed\n",
-				AP3426_REG_ALS_GAIN);
-		return rc;
-	}
-
-	/* Set als persistense */
-	rc = regmap_write(di->regmap, AP3426_REG_ALS_PERSIST, di->als_persist);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d register failed\n",
-				AP3426_REG_ALS_PERSIST);
-		return rc;
-	}
-
-	/* Set ps interrupt form */
-	rc = regmap_write(di->regmap, AP3426_REG_PS_INT_FORM, 0);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d register failed\n",
-				AP3426_REG_PS_INT_FORM);
-		return rc;
-	}
-
-	/* Set ps gain */
-	rc = regmap_write(di->regmap, AP3426_REG_PS_GAIN, di->ps_gain << 2);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d register failed\n",
-				AP3426_REG_PS_GAIN);
-		return rc;
-	}
-
-	/* Set ps persist */
-	rc = regmap_write(di->regmap, AP3426_REG_PS_PERSIST, di->ps_persist);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d register failed\n",
-				AP3426_REG_PS_PERSIST);
-		return rc;
-	}
-
-	/* Set PS LED driver strength */
-	rc = regmap_write(di->regmap, AP3426_REG_PS_LED_DRIVER,
-			di->ps_led_driver);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d register failed\n",
-				AP3426_REG_PS_LED_DRIVER);
-		return rc;
-	}
-
-	/* Set PS mean time */
-	rc = regmap_write(di->regmap, AP3426_REG_PS_MEAN_TIME,
-			di->ps_mean_time);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d register failed\n",
-				AP3426_REG_PS_MEAN_TIME);
-		return rc;
-	}
-
-	/* Set PS integrated time */
-	rc = regmap_write(di->regmap, AP3426_REG_PS_INT_TIME,
-			di->ps_integrated_time);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d register failed\n",
-				AP3426_REG_PS_INT_TIME);
-		return rc;
-	}
-
-	/* Set calibration parameter low byte */
-	rc = regmap_write(di->regmap, AP3426_REG_PS_CAL_L,
-			PS_LOW_BYTE(di->bias));
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d register failed\n",
-				AP3426_REG_PS_CAL_L);
-		return rc;
-	}
-
-	/* Set calibration parameter high byte */
-	rc = regmap_write(di->regmap, AP3426_REG_PS_CAL_H,
-			PS_HIGH_BYTE(di->bias));
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d register failed\n",
-				AP3426_REG_PS_CAL_H);
-		return rc;
-	}
-
-	dev_dbg(&di->i2c->dev, "ap3426 initialize sucessful\n");
-
-	return 0;
-}
-
-static int ap3426_calc_conversion_time(struct ap3426_data *di, int als_enabled,
-		int ps_enabled)
-{
-	int conversion_time = 0;
-
-	/* ALS conversion time is 100ms */
-	if (als_enabled)
-		conversion_time = 100;
-
-	if (ps_enabled)
-		conversion_time += pmt_table[di->ps_mean_time] +
-			di->ps_mean_time * di->ps_integrated_time / 16;
-
-	return conversion_time;
-}
-
-/* update als gain and threshold */
-static int ap3426_als_update_setting(struct ap3426_data *di,
-		unsigned int raw_value)
-{
-	int i;
-	int rc;
-	unsigned int lux_pre;
-	unsigned int config;
-	unsigned int adc_threshold;
-	unsigned int adc_base;
-	int gain_index; /* new gain index */
-	u8 als_data[4];
-
-	lux_pre = (raw_value * gain_table[di->als_gain]) >> 16;
-
-	for (i = ARRAY_SIZE(gain_table) - 1; i >= 0; i--) {
-		if (lux_pre < gain_table[i] *  ALS_GAIN_SWITCH_RATIO / 100)
-			break;
-	}
-
-	gain_index = i < 0 ? 0 : i;
-
-	/*
-	 * Disable als and enable it again to avoid incorrect value.
-	 * Updating als gain during als measurement cycle will cause
-	 * incorrect light sensor adc value. The logic here is to handle
-	 * this scenario.
-	 */
-	if (di->als_gain != gain_index) {
-		/* read the system config register */
-		rc = regmap_read(di->regmap, AP3426_REG_CONFIG, &config);
-		if (rc) {
-			dev_err(&di->i2c->dev, "read %d failed.(%d)\n",
-					AP3426_REG_CONFIG, rc);
-			return rc;
-		}
-
-		/* disable als_sensor */
-		rc = regmap_write(di->regmap, AP3426_REG_CONFIG,
-				config & (~0x01));
-		if (rc) {
-			dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-					AP3426_REG_CONFIG, rc);
-			return rc;
-		}
-
-		/* set als gain */
-		rc = regmap_write(di->regmap, AP3426_REG_ALS_GAIN, i << 4);
-		if (rc) {
-			dev_err(&di->i2c->dev, "write %d register failed\n",
-					AP3426_REG_ALS_GAIN);
-			return rc;
-		}
-	}
-
-	adc_base = raw_value * gain_table[di->als_gain] / gain_table[i];
-	adc_threshold = ((10 * sensitivity_table[i]) << 16) /
-		(di->als_cal * gain_table[i]);
-	if (adc_threshold < 1)
-		adc_threshold = 1;
-
-	dev_dbg(&di->i2c->dev, "adc_base:%d adc_threshold:%d\n", adc_base,
-			adc_threshold);
-
-	/* lower threshold */
-	if (adc_base < adc_threshold) {
-		als_data[0] = 0x0;
-		als_data[1] = 0x0;
-	} else {
-		als_data[0] = ALS_LOW_BYTE(adc_base - adc_threshold);
-		als_data[1] = ALS_HIGH_BYTE(adc_base - adc_threshold);
-	}
-
-	/* upper threshold */
-	if (adc_base + adc_threshold > ALS_DATA_MASK) {
-		if (di->als_gain != 0) { /* trigger interrupt anyway */
-			als_data[2] = als_data[0];
-			als_data[3] = als_data[1];
-		} else {
-			als_data[2] = ALS_LOW_BYTE(ALS_DATA_MASK);
-			als_data[3] = ALS_HIGH_BYTE(ALS_DATA_MASK);
-		}
-	} else {
-		als_data[2] = ALS_LOW_BYTE(adc_base + adc_threshold);
-		als_data[3] = ALS_HIGH_BYTE(adc_base + adc_threshold);
-	}
-
-	rc = regmap_bulk_write(di->regmap, AP3426_REG_ALS_LOW_THRES_0,
-			als_data, 4);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-				AP3426_REG_ALS_LOW_THRES_0, rc);
-		return rc;
-	}
-
-	dev_dbg(&di->i2c->dev, "als threshold: 0x%x 0x%x 0x%x 0x%x\n",
-			als_data[0], als_data[1], als_data[2],
-			als_data[3]);
-
-	/* Enable als again. */
-	if (di->als_gain != gain_index) {
-		rc = regmap_write(di->regmap, AP3426_REG_CONFIG, config | 0x01);
-		if (rc) {
-			dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-					AP3426_REG_CONFIG, rc);
-			return rc;
-		}
-
-		di->als_gain = i;
-	}
-
-	return 0;
-}
-
-/* Read raw data, convert it to human readable values, report it and
- * reconfigure the sensor.
+bool EnLSensorConfig_flag =0 ;
+bool EnPSensorConfig_flag =0 ;
+
+int lSensor_CALIDATA[2] = {0}; //input calibration data . Format : "200 lux -->lux value ; 1000 lux -->lux value"
+int pSensor_CALIDATA[2] = {0}; //input calibration data . Format : "near 3cm :--> value ; far  5cm :--> value"
+static int ap3426_power_set(struct ap3426_data * info, bool on);
+
+/*
+ * register access helpers
  */
-static int ap3426_process_data(struct ap3426_data *di, int als_ps)
+
+static int __ap3426_read_reg(struct i2c_client *client,
+	u32 reg, u8 mask, u8 shift)
 {
-	unsigned int gain;
-	ktime_t timestamp;
-	int rc = 0;
+    struct ap3426_data *data = i2c_get_clientdata(client);
+    u8 idx = 0xff;
 
-	unsigned int tmp;
-	u8 als_data[2];
-	int lux;
-
-	u8 ps_data[4];
-	int i;
-	int distance;
-
-	timestamp = ktime_get_boottime();
-
-	if (als_ps) { /* process als value */
-		/* Read data */
-		rc = regmap_bulk_read(di->regmap, AP3426_REG_ALS_DATA_LOW,
-				als_data, 2);
-		if (rc) {
-			dev_err(&di->i2c->dev, "read %d failed.(%d)\n",
-					AP3426_REG_ALS_DATA_LOW, rc);
-			goto exit;
-		}
-
-		gain = gain_table[di->als_gain];
-
-		/* lower bit */
-		lux = (als_data[0] * di->als_cal * gain / 10) >> 16;
-		/* higher bit */
-		lux += (als_data[1] * di->als_cal * gain / 10) >> 8;
-
-		dev_dbg(&di->i2c->dev, "lux:%d als_data:0x%x-0x%x\n",
-				lux, als_data[0], als_data[1]);
-
-		tmp = als_data[0] | (als_data[1] << 8);
-		if (lux != di->last_als && ((tmp != ALS_DATA_MASK) ||
-					((tmp == ALS_DATA_MASK) &&
-					 (di->als_gain == 0)))) {
-			input_report_abs(di->input_light, ABS_MISC, lux);
-			input_event(di->input_light, EV_SYN, SYN_TIME_SEC,
-					ktime_to_timespec(timestamp).tv_sec);
-			input_event(di->input_light, EV_SYN, SYN_TIME_NSEC,
-					ktime_to_timespec(timestamp).tv_nsec);
-			input_sync(di->input_light);
-		}
-
-		di->last_als = lux;
-
-		dev_dbg(&di->i2c->dev, "previous als_gain:%d\n", di->als_gain);
-
-		rc = ap3426_als_update_setting(di, tmp);
-		if (rc) {
-			dev_err(&di->i2c->dev, "update setting failed\n");
-			goto exit;
-		}
-	} else { /* process ps value*/
-		rc = regmap_bulk_read(di->regmap, AP3426_REG_PS_DATA_LOW,
-				ps_data, 2);
-		if (rc) {
-			dev_err(&di->i2c->dev, "read %d failed.(%d)\n",
-					AP3426_REG_PS_DATA_LOW, rc);
-			goto exit;
-		}
-
-		dev_dbg(&di->i2c->dev, "ps data: 0x%x 0x%x\n",
-				ps_data[0], ps_data[1]);
-
-		tmp = ps_data[0] | (ps_data[1] << 8);
-		for (i = 0; i < ARRAY_SIZE(ps_distance_table); i++) {
-			if (tmp > ps_distance_table[i])
-				break;
-		}
-		distance = i;
-
-		dev_dbg(&di->i2c->dev, "reprt work ps_data:%d\n", tmp);
-
-		/* Report ps data */
-		if (distance != di->last_ps) {
-			input_report_abs(di->input_proximity, ABS_DISTANCE,
-					distance);
-			input_event(di->input_proximity, EV_SYN, SYN_TIME_SEC,
-					ktime_to_timespec(timestamp).tv_sec);
-			input_event(di->input_proximity, EV_SYN, SYN_TIME_NSEC,
-					ktime_to_timespec(timestamp).tv_nsec);
-			input_sync(di->input_proximity);
-		}
-
-		di->last_ps = distance;
-
-		/* lower threshold */
-		if (distance < ARRAY_SIZE(ps_distance_table))
-			tmp = ps_distance_table[distance];
-		else
-			tmp = 0;
-
-		ps_data[0] = PS_LOW_BYTE(tmp);
-		ps_data[1] = PS_HIGH_BYTE(tmp);
-
-		/* upper threshold */
-		if (distance > 0)
-			tmp = ps_distance_table[distance - 1];
-		else
-			tmp = 0x3ff;
-
-		ps_data[2] = PS_LOW_BYTE(tmp);
-		ps_data[3] = PS_HIGH_BYTE(tmp);
-
-		dev_dbg(&di->i2c->dev, "ps threshold: 0x%x 0x%x 0x%x 0x%x\n",
-				ps_data[0], ps_data[1], ps_data[2], ps_data[3]);
-
-		rc = regmap_bulk_write(di->regmap, AP3426_REG_PS_LOW_THRES_0,
-				ps_data, 4);
-		if (rc) {
-			dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-					AP3426_REG_PS_LOW_THRES_0, rc);
-			goto exit;
-		}
-
-		dev_dbg(&di->i2c->dev, "ps report exit\n");
-	}
-
-exit:
-	return rc;
+    ADD_TO_IDX(reg,idx)
+	return (data->reg_cache[idx] & mask) >> shift;
 }
 
-static irqreturn_t ap3426_irq_handler(int irq, void *data)
+static int __ap3426_write_reg(struct i2c_client *client,
+	u32 reg, u8 mask, u8 shift, u8 val)
 {
-	struct ap3426_data *di = data;
-	bool rc;
+    struct ap3426_data *data = i2c_get_clientdata(client);
+    int ret = 0;
+    u8 tmp;
+    u8 idx = 0xff;
 
-	rc = queue_work(di->workqueue, &di->report_work);
-	/* wake up event should hold a wake lock until reported */
-	if (rc && (atomic_inc_return(&di->wake_count) == 1))
-		pm_stay_awake(&di->i2c->dev);
+    ADD_TO_IDX(reg,idx)
+	if (idx >= reg_num)
+	    return -EINVAL;
 
+    tmp = data->reg_cache[idx];
+    tmp &= ~mask;
+    tmp |= val << shift;
 
-	return IRQ_HANDLED;
+    ret = i2c_smbus_write_byte_data(client, reg, tmp);
+    if (!ret)
+	data->reg_cache[idx] = tmp;
+
+    return ret;
 }
 
-static void ap3426_report_work(struct work_struct *work)
-{
-	struct ap3426_data *di = container_of(work, struct ap3426_data,
-			report_work);
-	int rc;
-	unsigned int status;
-
-	mutex_lock(&di->ops_lock);
-
-	/* avoid fake interrupt */
-	if (!di->power_enabled) {
-		dev_dbg(&di->i2c->dev, "fake interrupt triggered\n");
-		goto exit;
-	}
-
-	rc = regmap_read(di->regmap, AP3426_REG_INT_FLAG, &status);
-	if (rc) {
-		dev_err(&di->i2c->dev, "read %d failed.(%d)\n",
-				AP3426_REG_INT_FLAG, rc);
-		status |= AP3426_PS_INT_MASK;
-		goto exit;
-	}
-
-	dev_dbg(&di->i2c->dev, "interrupt issued status=0x%x.\n", status);
-
-	/* als interrupt issueed */
-	if ((status & AP3426_ALS_INT_MASK) && (di->als_enabled)) {
-		rc = ap3426_process_data(di, 1);
-		if (rc)
-			goto exit;
-		dev_dbg(&di->i2c->dev, "process als data done!\n");
-	}
-
-	if ((status & AP3426_PS_INT_MASK) && (di->ps_enabled)) {
-		rc = ap3426_process_data(di, 0);
-		if (rc)
-			goto exit;
-		dev_dbg(&di->i2c->dev, "process ps data done!\n");
-		pm_wakeup_event(&di->input_proximity->dev, 200);
-	}
-
-exit:
-	if (atomic_dec_and_test(&di->wake_count)) {
-		pm_relax(&di->i2c->dev);
-		dev_dbg(&di->i2c->dev, "wake lock released\n");
-	}
-
-	/* clear interrupt */
-	if (di->power_enabled) {
-		if (regmap_write(di->regmap, AP3426_REG_INT_FLAG, 0x0))
-			dev_err(&di->i2c->dev, "clear interrupt failed\n");
-	}
-
-	mutex_unlock(&di->ops_lock);
-}
-
-static int ap3426_enable_ps(struct ap3426_data *di, int enable)
-{
-	unsigned int config;
-	int rc = 0;
-
-	rc = regmap_read(di->regmap, AP3426_REG_CONFIG, &config);
-	if (rc) {
-		dev_err(&di->i2c->dev, "read %d failed.(%d)\n",
-				AP3426_REG_CONFIG, rc);
-		goto exit;
-	}
-
-	/* avoid operate sensor in different executing context */
-	if (enable) {
-		/* Enable ps sensor */
-		rc = regmap_write(di->regmap, AP3426_REG_CONFIG, config | 0x02);
-		if (rc) {
-			dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-					AP3426_REG_CONFIG, rc);
-			goto exit;
-		}
-
-		/* wait the data ready */
-		msleep(ap3426_calc_conversion_time(di, di->als_enabled, 1));
-
-		/* Clear last value and report it even not change. */
-		di->last_ps = -1;
-		rc = ap3426_process_data(di, 0);
-		if (rc) {
-			dev_err(&di->i2c->dev, "process ps data failed\n");
-			goto exit;
-		}
-
-		/* clear interrupt */
-		rc = regmap_write(di->regmap, AP3426_REG_INT_FLAG, 0x0);
-		if (rc) {
-			dev_err(&di->i2c->dev, "clear interrupt failed\n");
-			goto exit;
-		}
-
-		di->ps_enabled = true;
-	} else {
-		/* disable the ps_sensor */
-		rc = regmap_write(di->regmap, AP3426_REG_CONFIG,
-				config & (~0x2));
-		if (rc) {
-			dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-					AP3426_REG_CONFIG, rc);
-			goto exit;
-		}
-		di->ps_enabled = false;
-	}
-exit:
-	return rc;
-}
-
-static int ap3426_enable_als(struct ap3426_data *di, int enable)
-{
-	unsigned int config;
-	int rc = 0;
-
-	/* Read the system config register */
-	rc = regmap_read(di->regmap, AP3426_REG_CONFIG, &config);
-	if (rc) {
-		dev_err(&di->i2c->dev, "read %d failed.(%d)\n",
-				AP3426_REG_CONFIG, rc);
-		goto exit;
-	}
-
-	if (enable) {
-		/* enable als_sensor */
-		rc = regmap_write(di->regmap, AP3426_REG_CONFIG, config | 0x01);
-		if (rc) {
-			dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-					AP3426_REG_CONFIG, rc);
-			goto exit;
-		}
-
-		/* wait data ready */
-		msleep(ap3426_calc_conversion_time(di, 1, di->ps_enabled));
-
-		/* Clear last value and report even not change. */
-		di->last_als = -1;
-
-		rc = ap3426_process_data(di, 1);
-		if (rc) {
-			dev_err(&di->i2c->dev, "process als data failed\n");
-			goto exit;
-		}
-
-		/* clear interrupt */
-		rc = regmap_write(di->regmap, AP3426_REG_INT_FLAG, 0x0);
-		if (rc) {
-			dev_err(&di->i2c->dev, "clear interrupt failed\n");
-			goto exit;
-		}
-
-		di->als_enabled = 1;
-
-	} else {
-		/* disable the als_sensor */
-		rc = regmap_write(di->regmap, AP3426_REG_CONFIG,
-				config & (~0x1));
-		if (rc) {
-			dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-					AP3426_REG_CONFIG, rc);
-			goto exit;
-		}
-		di->als_enabled = 0;
-	}
-exit:
-	return rc;
-}
-
-/* Sync delay to hardware according configurations
- * Note one of the sensor may report faster than expected.
+/*
+ * internally used functions
  */
-static int ap3426_sync_delay(struct ap3426_data *di, int als_enabled,
-		int ps_enabled, unsigned int als_delay, unsigned int ps_delay)
+
+/* range */
+static int ap3426_get_range(struct i2c_client *client)
 {
-	unsigned int convert_msec;
-	unsigned int delay;
-	int rc;
+    u8 idx = __ap3426_read_reg(client, AP3426_REG_ALS_CONF,
+	    AP3426_ALS_RANGE_MASK, AP3426_ALS_RANGE_SHIFT); 
+    return range[idx];
+}
 
-	/* ignore delay synchonization while power not enabled */
-	if (!di->power_enabled) {
-		dev_dbg(&di->i2c->dev, "power is not enabled\n");
-		return 0;
+static int ap3426_set_range(struct i2c_client *client, int range)
+{
+    return __ap3426_write_reg(client, AP3426_REG_ALS_CONF,
+	    AP3426_ALS_RANGE_MASK, AP3426_ALS_RANGE_SHIFT, range);
+}
+
+
+/* mode */
+static int ap3426_get_mode(struct i2c_client *client)
+{
+    int ret;
+
+    ret = __ap3426_read_reg(client, AP3426_REG_SYS_CONF,
+	    AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT);
+    return ret;
+}
+
+static int ap3426_set_mode(struct i2c_client *client, int mode)
+{
+    int ret;
+
+/*    if(mode == AP3426_SYS_PS_ENABLE) {
+	misc_ps_opened = 1;
+    } else if(mode == AP3426_SYS_ALS_ENABLE) {
+	misc_ls_opened = 1;
+    } else if(mode == AP3426_SYS_ALS_PS_ENABLE) {
+	misc_ps_opened = 1;
+	misc_ls_opened = 1;
+    } else if(mode == AP3426_SYS_DEV_DOWN) {
+	misc_ps_opened = 0;
+	misc_ls_opened = 0;
+    }*/
+    if(mode & AP3426_SYS_PS_ENABLE) {
+	misc_ps_opened = 1;
+    } else {
+    	misc_ps_opened = 0;
+    } 
+
+   if(mode & AP3426_SYS_ALS_ENABLE) {
+	misc_ls_opened = 1;
+    } else {
+    	misc_ls_opened = 0;
+    }
+
+    ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
+	    AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, mode);
+
+    return ret;
+}
+
+/* ALS low threshold */
+static int ap3426_get_althres(struct i2c_client *client)
+{
+    int lsb, msb;
+    lsb = __ap3426_read_reg(client, AP3426_REG_ALS_THDL_L,
+	    AP3426_REG_ALS_THDL_L_MASK, AP3426_REG_ALS_THDL_L_SHIFT);
+    msb = __ap3426_read_reg(client, AP3426_REG_ALS_THDL_H,
+	    AP3426_REG_ALS_THDL_H_MASK, AP3426_REG_ALS_THDL_H_SHIFT);
+    return ((msb << 8) | lsb);
+}
+
+static int ap3426_set_althres(struct i2c_client *client, int val)
+{
+
+    int lsb, msb, err;
+
+    msb = val >> 8;
+    lsb = val & AP3426_REG_ALS_THDL_L_MASK;
+	//printk("[LS][AP3426] %s msb=%d,lsb=%d\n", __func__,msb,lsb);
+    err = __ap3426_write_reg(client, AP3426_REG_ALS_THDL_L,
+	    AP3426_REG_ALS_THDL_L_MASK, AP3426_REG_ALS_THDL_L_SHIFT, lsb);
+    if (err)
+	return err;
+
+    err = __ap3426_write_reg(client, AP3426_REG_ALS_THDL_H,
+	    AP3426_REG_ALS_THDL_H_MASK, AP3426_REG_ALS_THDL_H_SHIFT, msb);
+
+    return err;
+}
+
+/* ALS high threshold */
+static int ap3426_get_ahthres(struct i2c_client *client)
+{
+    int lsb, msb;
+    lsb = __ap3426_read_reg(client, AP3426_REG_ALS_THDH_L,
+	    AP3426_REG_ALS_THDH_L_MASK, AP3426_REG_ALS_THDH_L_SHIFT);
+    msb = __ap3426_read_reg(client, AP3426_REG_ALS_THDH_H,
+	    AP3426_REG_ALS_THDH_H_MASK, AP3426_REG_ALS_THDH_H_SHIFT);
+    return ((msb << 8) | lsb);
+}
+
+static int ap3426_set_ahthres(struct i2c_client *client, int val)
+{
+    int lsb, msb, err;
+
+    msb = val >> 8;
+    lsb = val & AP3426_REG_ALS_THDH_L_MASK;
+
+    err = __ap3426_write_reg(client, AP3426_REG_ALS_THDH_L,
+	    AP3426_REG_ALS_THDH_L_MASK, AP3426_REG_ALS_THDH_L_SHIFT, lsb);
+    if (err)
+	return err;
+
+    err = __ap3426_write_reg(client, AP3426_REG_ALS_THDH_H,
+	    AP3426_REG_ALS_THDH_H_MASK, AP3426_REG_ALS_THDH_H_SHIFT, msb);
+
+    return err;
+}
+
+/* PX low threshold */
+static int ap3426_get_plthres(struct i2c_client *client)
+{
+    int lsb, msb;
+    lsb = __ap3426_read_reg(client, AP3426_REG_PS_THDL_L,
+	    AP3426_REG_PS_THDL_L_MASK, AP3426_REG_PS_THDL_L_SHIFT);
+    msb = __ap3426_read_reg(client, AP3426_REG_PS_THDL_H,
+	    AP3426_REG_PS_THDL_H_MASK, AP3426_REG_PS_THDL_H_SHIFT);
+    return ((msb << 8) | lsb);
+}
+
+
+
+static int ap3426_set_crosstalk(struct i2c_client *client, int val)
+{
+    int lsb, msb, err;
+
+    msb = val >> 8;
+    lsb = val & AP3426_REG_PS_CAL_L_MASK;
+//	printk("%s:ASUS_PSENSOR SETCALI_DATA : msb :  %d ,lsb:  %d \n", 
+//			__func__, msb,lsb);
+    err = __ap3426_write_reg(client, AP3426_REG_PS_CAL_L,
+	    AP3426_REG_PS_CAL_L_MASK, AP3426_REG_PS_CAL_L_SHIFT, lsb);
+    if (err)
+	return err;
+
+    err = __ap3426_write_reg(client, AP3426_REG_PS_CAL_H,
+	    AP3426_REG_PS_CAL_H_MASK, AP3426_REG_PS_CAL_H_SHIFT, msb);
+
+    return err;
+}
+
+
+static int ap3426_set_plthres(struct i2c_client *client, int val)
+{
+    int lsb, msb, err;
+
+    msb = val >> 8;
+    lsb = val & AP3426_REG_PS_THDL_L_MASK;
+    err = __ap3426_write_reg(client, AP3426_REG_PS_THDL_L,
+	    AP3426_REG_PS_THDL_L_MASK, AP3426_REG_PS_THDL_L_SHIFT, lsb);
+    if (err)
+	return err;
+
+    err = __ap3426_write_reg(client, AP3426_REG_PS_THDL_H,
+	    AP3426_REG_PS_THDL_H_MASK, AP3426_REG_PS_THDL_H_SHIFT, msb);
+
+    return err;
+}
+
+/* PX high threshold */
+static int ap3426_get_phthres(struct i2c_client *client)
+{
+    int lsb, msb;
+    lsb = __ap3426_read_reg(client, AP3426_REG_PS_THDH_L,
+	    AP3426_REG_PS_THDH_L_MASK, AP3426_REG_PS_THDH_L_SHIFT);
+    msb = __ap3426_read_reg(client, AP3426_REG_PS_THDH_H,
+	    AP3426_REG_PS_THDH_H_MASK, AP3426_REG_PS_THDH_H_SHIFT);
+    return ((msb << 8) | lsb);
+}
+
+static int ap3426_set_phthres(struct i2c_client *client, int val)
+{
+    int lsb, msb, err;
+
+    msb = val >> 8;
+    lsb = val & AP3426_REG_PS_THDH_L_MASK;
+	LDBG("ZXTEST ap3426_set_phthres lsb = %x\n", lsb);
+	
+    err = __ap3426_write_reg(client, AP3426_REG_PS_THDH_L,
+	    AP3426_REG_PS_THDH_L_MASK, AP3426_REG_PS_THDH_L_SHIFT, lsb);
+    if (err)
+	return err;
+	LDBG("ZXTEST ap3426_set_phthres msb = %x\n", msb);
+    err = __ap3426_write_reg(client, AP3426_REG_PS_THDH_H,
+	    AP3426_REG_PS_THDH_H_MASK, AP3426_REG_PS_THDH_H_SHIFT, msb);
+	LDBG("ZXTEST ap3426_set_phthres end = %x\n", msb);
+    return err;
+}
+
+static int ap3426_get_adc_value(struct i2c_client *client)
+{
+    unsigned int lsb, msb,val;
+#ifdef LSC_DBG
+    unsigned int tmp,range;
+#endif
+
+    lsb = i2c_smbus_read_byte_data(client, AP3426_REG_ALS_DATA_LOW);
+
+    if (lsb < 0) {
+	return lsb;
+    }
+
+    msb = i2c_smbus_read_byte_data(client, AP3426_REG_ALS_DATA_HIGH);
+
+    if (msb < 0)
+	return msb;
+
+#ifdef LSC_DBG
+    range = ap3426_get_range(client);
+    tmp = (((msb << 8) | lsb) * range) >> 16;
+    tmp = tmp * cali / 100;
+//    LDBG("ALS val=%d lux\n",tmp);
+#endif
+    val = msb << 8 | lsb;
+    return val;
+}
+
+
+static int ap3426_get_object(struct i2c_client *client)
+{
+    int val;
+
+    val = i2c_smbus_read_byte_data(client, AP3426_OBJ_COMMAND);
+//    LDBG("val=%x\n", val);
+    val &= AP3426_OBJ_MASK;
+
+    return val >> AP3426_OBJ_SHIFT;
+}
+
+static int ap3426_get_intstat(struct i2c_client *client)
+{
+    int val;
+
+    val = i2c_smbus_read_byte_data(client, AP3426_REG_SYS_INTSTATUS);
+    val &= AP3426_REG_SYS_INT_MASK;
+
+    return val >> AP3426_REG_SYS_INT_SHIFT;
+}
+
+
+static int ap3426_get_px_value(struct i2c_client *client)
+{
+    int lsb, msb;
+
+    lsb = i2c_smbus_read_byte_data(client, AP3426_REG_PS_DATA_LOW);
+
+    if (lsb < 0) {
+	return lsb;
+    }
+
+//    LDBG("%s, IR = %d\n", __func__, (u32)(lsb));
+    msb = i2c_smbus_read_byte_data(client, AP3426_REG_PS_DATA_HIGH);
+
+    if (msb < 0)
+	return msb;
+
+//    LDBG("%s, IR = %d\n", __func__, (u32)(msb));
+
+    return (u32)(((msb & AL3426_REG_PS_DATA_HIGH_MASK) << 8) | (lsb & AL3426_REG_PS_DATA_LOW_MASK));
+}
+
+static void ap3426_change_ls_threshold(struct i2c_client *client);
+
+static int ap3426_lsensor_enable(struct i2c_client *client)
+{
+    int ret = 0,mode;
+
+    mode = ap3426_get_mode(client);
+    if((mode & AP3426_SYS_ALS_ENABLE) == 0){
+	mode |= AP3426_SYS_ALS_ENABLE;
+	ret = ap3426_set_mode(client,mode);
+    }
+
+    return ret;
+}
+
+static int ap3426_lsensor_disable(struct i2c_client *client)
+{
+    int ret = 0,mode;
+
+    mode = ap3426_get_mode(client);
+    if(mode & AP3426_SYS_ALS_ENABLE){
+	mode &= ~AP3426_SYS_ALS_ENABLE;
+	if(mode == AP3426_SYS_DEV_RESET)
+	    mode = 0;
+	ret = ap3426_set_mode(client,mode);
+    }
+
+    return ret;
+}
+
+
+static int lsensor_open(struct inode *inode, struct file *file)
+{
+	int rc = 0;
+	printk("[LS][AP3426] %s\n", __func__);
+	
+	if (private_pl_data -> ls_opened) {
+		pr_err("[LS][AP3426 error]%s: already opened\n", __func__);
+		rc = -EBUSY;
 	}
-	convert_msec = ap3426_calc_conversion_time(di, als_enabled, ps_enabled);
 
-	if (als_enabled && ps_enabled)
-		delay = min(als_delay, ps_delay);
-	else if (als_enabled)
-		delay = als_delay;
-	else if (ps_enabled)
-		delay = ps_delay;
-	else
-		return 0;
+	private_pl_data -> ls_opened = 1;
+	return rc;
+}
 
-	if (delay < convert_msec)
-		delay = 0;
-	else
-		delay -= convert_msec;
-
-	/* Insert delay_msec into wait slots. The maximum is 255 * 5ms */
-	dev_dbg(&di->i2c->dev, "wait time: %lu\n", min(delay / 5UL, 255UL));
-	rc = regmap_write(di->regmap, AP3426_REG_WAIT_TIME,
-			min(delay / 5UL, 255UL));
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d failed\n",
-				AP3426_REG_WAIT_TIME);
-		return rc;
-	}
-
+static int lsensor_release(struct inode *inode, struct file *file)
+{
+	printk("[LS][AP3426] %s\n", __func__);
+	private_pl_data -> ls_opened = 0;
 	return 0;
 }
 
-static void ap3426_als_enable_work(struct work_struct *work)
-{
-	struct ap3426_data *di = container_of(work, struct ap3426_data,
-			als_enable_work);
 
-	mutex_lock(&di->ops_lock);
-	if (!di->power_enabled) {
-		if (sensor_power_config(&di->i2c->dev, power_config,
-					ARRAY_SIZE(power_config), true)) {
-			dev_err(&di->i2c->dev, "power up sensor failed.\n");
-			goto exit;
+//<asus-annacheng20150129>>>>>>>>>>>>>>>+
+
+static int ap3426_lightsensor_proc_show(struct seq_file *m, void *v) {
+	
+	//if(!lightsensor_entry){
+		int ret = 0;
+		int idreg;
+		//uint8_t i;				
+		
+		struct ap3426_data *lpi = private_pl_data;   
+		 idreg = i2c_smbus_read_byte_data(lpi->client, 0x04);//0x04 spec not found
+
+		printk("anna-sensor idreg : 0x04=0x%d \n", idreg);
+	      
+	  	if(idreg<0){
+			ret =seq_printf(m," ERROR: i2c r/w test fail\n");	
+		}else{
+			ret =seq_printf(m," ACK: i2c r/w test ok\n");	
+		}
+		if(Driverversion != NULL){
+			ret =seq_printf(m," Driver version:%s\n",Driverversion);
+		}
+		else{
+			ret =seq_printf(m," Driver version:NULL\n");
+		}
+	  	if(idreg==0x06){
+	  		ret =seq_printf(m," Vendor:%s(%d)\n", VENDOR,idreg);
+		}else{
+			ret =seq_printf(m," Vendor:%s\n", VENDOR);
 		}
 
-		msleep(AP3426_BOOT_TIME_MS);
-		di->power_enabled = true;
-		if (ap3426_init_device(di)) {
-			dev_err(&di->i2c->dev, "init device failed\n");
-			goto exit_power_off;
+		 idreg = i2c_smbus_read_byte_data(lpi->client, 0x04);
+		if(idreg<0){	  		
+			ret =seq_printf(m," Device status:error\n");
+		}else{
+			ret =seq_printf(m," Device status:ok\n");			
 		}
-	}
+	     	    
+   	return ret;
 
-	/* Old HAL: Sync to last delay. New HAL: Sync to current delay */
-	if (ap3426_sync_delay(di, 1, di->ps_enabled, di->als_delay,
-				di->ps_delay))
-		goto exit_power_off;
-
-	if (ap3426_enable_als(di, 1)) {
-		dev_err(&di->i2c->dev, "enable als failed\n");
-		goto exit_power_off;
-	}
-
-exit_power_off:
-	if ((!di->als_enabled) && (!di->ps_enabled) &&
-			di->power_enabled) {
-		if (sensor_power_config(&di->i2c->dev, power_config,
-					ARRAY_SIZE(power_config), false)) {
-			dev_err(&di->i2c->dev, "power up sensor failed.\n");
-			goto exit;
-		}
-		di->power_enabled = false;
-	}
-
-exit:
-	mutex_unlock(&di->ops_lock);
-	return;
 }
 
+static int ap3426_Proximitysensor_proc_show(struct seq_file *m, void *v) {
+	
+	//if(!lightsensor_entry){
+		int ret = 0;
+		int idreg;
+		//uint8_t i;				
+		
+	   	struct ap3426_data *lpi = private_pl_data;   
+		 idreg = i2c_smbus_read_byte_data(lpi->client, 0x04);
 
-static void ap3426_als_disable_work(struct work_struct *work)
-{
-	struct ap3426_data *di = container_of(work, struct ap3426_data,
-			als_disable_work);
-
-	mutex_lock(&di->ops_lock);
-
-	if (ap3426_enable_als(di, 0)) {
-		dev_err(&di->i2c->dev, "disable als failed\n");
-		goto exit;
-	}
-
-	if (ap3426_sync_delay(di, 0, di->ps_enabled, di->als_delay,
-			di->ps_delay))
-		goto exit;
-
-	if ((!di->als_enabled) && (!di->ps_enabled) && di->power_enabled) {
-		if (sensor_power_config(&di->i2c->dev, power_config,
-					ARRAY_SIZE(power_config), false)) {
-			dev_err(&di->i2c->dev, "power up sensor failed.\n");
-			goto exit;
+		printk("anna-sensor idreg : 0x0d=0x%d \n", idreg);
+	      
+	  	if(idreg<0){
+			ret =seq_printf(m," ERROR: i2c r/w test fail\n");	
+		}else{
+			ret =seq_printf(m," ACK: i2c r/w test ok\n");	
+		}
+		if(Driverversion != NULL){
+			ret =seq_printf(m," Driver version:%s\n",Driverversion);
+		}
+		else{
+			ret =seq_printf(m," Driver version:NULL\n");
+		}
+	  	if(idreg==0x06){
+	  		ret =seq_printf(m," Vendor:%s(%d)\n", VENDOR,idreg);
+		}else{
+			ret =seq_printf(m," Vendor:%s\n", VENDOR);
 		}
 
-		di->power_enabled = false;
-	}
+	      idreg = i2c_smbus_read_byte_data(lpi->client, 0x04);
 
-exit:
-	mutex_unlock(&di->ops_lock);
+		if(idreg<0){	  		
+			ret =seq_printf(m," Device status:error\n");
+			//return seq_printf(m, " ERROR: i2c r/w test fail\n Driver version:1.0.0\n Vendor:0x0%x\n Device status error.\n",idReg);
+		}else{
+			ret =seq_printf(m," Device status:ok\n");			
+		}
+	     	    
+   	return ret;
+
 }
 
-static void ap3426_ps_enable_work(struct work_struct *work)
-{
-	struct ap3426_data *di = container_of(work, struct ap3426_data,
-			ps_enable_work);
-
-	mutex_lock(&di->ops_lock);
-	if (!di->power_enabled) {
-		if (sensor_power_config(&di->i2c->dev, power_config,
-					ARRAY_SIZE(power_config), true)) {
-			dev_err(&di->i2c->dev, "power up sensor failed.\n");
-			goto exit;
-		}
-
-		msleep(AP3426_BOOT_TIME_MS);
-		di->power_enabled = true;
-
-		if (ap3426_init_device(di)) {
-			dev_err(&di->i2c->dev, "init device failed\n");
-			goto exit_power_off;
-		}
-	}
-
-	/* Old HAL: Sync to last delay. New HAL: Sync to current delay */
-	if (ap3426_sync_delay(di, di->als_enabled, 1, di->als_delay,
-				di->ps_delay))
-		goto exit_power_off;
-
-	if (ap3426_enable_ps(di, 1)) {
-		dev_err(&di->i2c->dev, "enable ps failed\n");
-		goto exit_power_off;
-	}
-
-exit_power_off:
-	if ((!di->als_enabled) && (!di->ps_enabled) &&
-			di->power_enabled) {
-		if (sensor_power_config(&di->i2c->dev, power_config,
-					ARRAY_SIZE(power_config), false)) {
-			dev_err(&di->i2c->dev, "power up sensor failed.\n");
-			goto exit;
-		}
-		di->power_enabled = false;
-	}
-
-exit:
-	mutex_unlock(&di->ops_lock);
-	return;
+static int ap3426_lightsensor_proc_open(struct inode *inode, struct  file *file) {
+  return single_open(file, ap3426_lightsensor_proc_show, NULL);
 }
 
-static void ap3426_ps_disable_work(struct work_struct *work)
-{
-	struct ap3426_data *di = container_of(work, struct ap3426_data,
-			ps_disable_work);
-
-	mutex_lock(&di->ops_lock);
-
-	if (ap3426_enable_ps(di, 0)) {
-		dev_err(&di->i2c->dev, "disable ps failed\n");
-		goto exit;
-	}
-
-	if (ap3426_sync_delay(di, di->als_enabled, 0, di->als_delay,
-			di->ps_delay))
-		goto exit;
-
-	if ((!di->als_enabled) && (!di->ps_enabled) && di->power_enabled) {
-		if (sensor_power_config(&di->i2c->dev, power_config,
-					ARRAY_SIZE(power_config), false)) {
-			dev_err(&di->i2c->dev, "power up sensor failed.\n");
-			goto exit;
-		}
-
-		di->power_enabled = false;
-	}
-exit:
-	mutex_unlock(&di->ops_lock);
-}
-
-static struct regmap_config ap3426_regmap_config = {
-	.reg_bits = 8,
-	.val_bits = 8,
+static const struct file_operations ap3426_lightsensor_proc_fops = {
+  .owner = THIS_MODULE,
+  .open = ap3426_lightsensor_proc_open,
+  .read = seq_read,
+  .llseek = seq_lseek,
+  .release = single_release,
 };
 
-static int ap3426_cdev_enable_als(struct sensors_classdev *sensors_cdev,
-		unsigned int enable)
-{
-	int res = 0;
-	struct ap3426_data *di = container_of(sensors_cdev,
-			struct ap3426_data, als_cdev);
-
-	mutex_lock(&di->ops_lock);
-
-	if (enable)
-		queue_work(di->workqueue, &di->als_enable_work);
-	else
-		queue_work(di->workqueue, &di->als_disable_work);
-
-	mutex_unlock(&di->ops_lock);
-
-	return res;
+static int ap3426_Proximitysensor_proc_open(struct inode *inode, struct  file *file) {
+  return single_open(file, ap3426_Proximitysensor_proc_show, NULL);
 }
 
-static int ap3426_cdev_enable_ps(struct sensors_classdev *sensors_cdev,
-		unsigned int enable)
-{
-	struct ap3426_data *di = container_of(sensors_cdev,
-			struct ap3426_data, ps_cdev);
+static const struct file_operations ap3426_Proximitysensor_proc_fops = {
+  .owner = THIS_MODULE,
+  .open = ap3426_Proximitysensor_proc_open,
+  .read = seq_read,
+  .llseek = seq_lseek,
+  .release = single_release,
+};
 
-	mutex_lock(&di->ops_lock);
+int create_ap3426_asusproc_lightsensor_status_entry(void){
+	ap3426_lightsensor_entry = proc_create("lightsensor_status", S_IWUGO| S_IRUGO, NULL,&ap3426_lightsensor_proc_fops);
+ 	if (!ap3426_lightsensor_entry)
+       		 return -ENOMEM;
 
-	if (enable)
-		queue_work(di->workqueue, &di->ps_enable_work);
-	else
-		queue_work(di->workqueue, &di->ps_disable_work);
-
-	mutex_unlock(&di->ops_lock);
-
-	return 0;
+    	return 0;
 }
 
-static int ap3426_cdev_set_als_delay(struct sensors_classdev *sensors_cdev,
-		unsigned int delay_msec)
-{
-	struct ap3426_data *di = container_of(sensors_cdev,
-			struct ap3426_data, als_cdev);
+int create_ap3426_asusproc_Proximitysensor_status_entry(void){
+	ap3426_proximitysensor_entry = proc_create("Proximitysensor_status", S_IWUGO| S_IRUGO, NULL,&ap3426_Proximitysensor_proc_fops);
+	if (!ap3426_proximitysensor_entry)
+       		 return -ENOMEM;
 
-	mutex_lock(&di->ops_lock);
+    	return 0;
+}
+//<asus-<asus-annacheng20150129>><<<<<<<<<<<<<+
 
-	di->als_delay = delay_msec;
-	ap3426_sync_delay(di, di->als_enabled, di->ps_enabled,
-			di->als_delay, di->ps_delay);
 
-	mutex_unlock(&di->ops_lock);
 
-	return 0;
+//<-------ward_du------->
+//<-- ASUS-Bevis_Chen - -->
+
+//=========================================
+
+//     Calibration Formula:
+
+//     y = f(x) 
+
+//  -> ax - by = constant_k
+
+//     a is f(x2) - f(x1) , b is x2 - x1
+
+////=========================================            
+
+int static calibration_light_ap3426(int x_big, int x_small, int report_lux){        
+
+                    int y_big = 1000;
+                    int y_small = 200;
+                    int constant_k;
+
+					    if (x_small == 1) {
+					        x_small = 0;
+					        y_small = 0;
+					    }
+			 constant_k = (y_big - y_small)*x_small - (x_big - x_small)*y_small;
+			 if ( report_lux*(y_big - y_small) < constant_k){
+                              return 0; 
+                        }else {   
+                             return ((report_lux*(y_big - y_small) - constant_k) / (x_big - x_small));			
+                        }
 }
 
-static int ap3426_cdev_set_ps_delay(struct sensors_classdev *sensors_cdev,
-		unsigned int delay_msec)
+static long lsensor_ioctl(struct file *file, unsigned int cmd,unsigned long arg)
 {
-	struct ap3426_data *di = container_of(sensors_cdev,
-			struct ap3426_data, ps_cdev);
-
-	mutex_lock(&di->ops_lock);
-
-	di->ps_delay = delay_msec;
-	ap3426_sync_delay(di, di->als_enabled, di->ps_enabled,
-			di->als_delay, di->ps_delay);
-
-	mutex_unlock(&di->ops_lock);
-
-	return 0;
-}
-
-static int ap3426_cdev_ps_flush(struct sensors_classdev *sensors_cdev)
-{
-	struct ap3426_data *di = container_of(sensors_cdev,
-			struct ap3426_data, ps_cdev);
-
-	input_event(di->input_proximity, EV_SYN, SYN_CONFIG,
-			di->flush_count++);
-	input_sync(di->input_proximity);
-
-	return 0;
-}
-
-static int ap3426_cdev_als_flush(struct sensors_classdev *sensors_cdev)
-{
-	struct ap3426_data *di = container_of(sensors_cdev,
-			struct ap3426_data, als_cdev);
-
-	input_event(di->input_light, EV_SYN, SYN_CONFIG, di->flush_count++);
-	input_sync(di->input_light);
-
-	return 0;
-}
-
-/* This function should be called when sensor is disabled */
-static int ap3426_cdev_ps_calibrate(struct sensors_classdev *sensors_cdev,
-		int axis, int apply_now)
-{
-	int rc;
-	int power;
-	unsigned int config;
-	unsigned int interrupt;
-	u16 min = PS_DATA_MASK;
-	u8 ps_data[2];
-	int count = AP3426_CALIBRATE_SAMPLES;
-	struct ap3426_data *di = container_of(sensors_cdev,
-			struct ap3426_data, ps_cdev);
-
-
-	if (axis != AXIS_BIAS)
-		return 0;
-
-	mutex_lock(&di->ops_lock);
-
-	/* Ensure only be called when sensors in standy mode */
-	if (di->als_enabled || di->ps_enabled) {
-		rc = -EPERM;
-		goto exit;
-	}
-
-	power = di->power_enabled;
-	if (!power) {
-		rc = sensor_power_config(&di->i2c->dev, power_config,
-					ARRAY_SIZE(power_config), true);
-		if (rc) {
-			dev_err(&di->i2c->dev, "power up sensor failed.\n");
-			goto exit;
-		}
-
-		msleep(AP3426_BOOT_TIME_MS);
-
-		rc = ap3426_init_device(di);
-		if (rc) {
-			dev_err(&di->i2c->dev, "init ap3426 failed\n");
-			goto exit;
-		}
-	}
-
-	rc = regmap_read(di->regmap, AP3426_REG_INT_CTL, &interrupt);
-	if (rc) {
-		dev_err(&di->i2c->dev, "read interrupt configuration failed\n");
-		goto exit_power_off;
-	}
-
-	/* disable interrupt */
-	rc = regmap_write(di->regmap, AP3426_REG_INT_CTL, 0x0);
-	if (rc) {
-		dev_err(&di->i2c->dev, "disable interrupt failed\n");
-		goto exit_power_off;
-	}
-
-	rc = regmap_read(di->regmap, AP3426_REG_CONFIG, &config);
-	if (rc) {
-		dev_err(&di->i2c->dev, "read %d failed.(%d)\n",
-				AP3426_REG_CONFIG, rc);
-		goto exit_enable_interrupt;
-	}
-
-	/* clear wait time */
-	rc = regmap_write(di->regmap, AP3426_REG_WAIT_TIME, 0x0);
-	if (rc) {
-		dev_err(&di->i2c->dev, "clear wait time failed\n");
-		goto exit_enable_interrupt;
-	}
-
-	/* clear offset */
-	ps_data[0] = 0;
-	ps_data[1] = 0;
-	rc = regmap_bulk_write(di->regmap, AP3426_REG_PS_CAL_L,
-			ps_data, 2);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-				AP3426_REG_PS_CAL_L, rc);
-		goto exit_enable_interrupt;
-	}
-
-	/* enable ps sensor */
-	rc = regmap_write(di->regmap, AP3426_REG_CONFIG, config | 0x02);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-				AP3426_REG_CONFIG, rc);
-		goto exit_disable_ps;
-	}
-
-	while (--count) {
-		/*
-		 * This function is expected to be executed only 1 time in
-		 * factory and never be executed again during the device's
-		 * life time. It's fine to busy wait for data ready.
-		 */
-		usleep_range(ap3426_calc_conversion_time(di, 0, 1) * 1000,
-			(ap3426_calc_conversion_time(di, 0, 1) + 1) * 1000);
-		rc = regmap_bulk_read(di->regmap, AP3426_REG_PS_DATA_LOW,
-				ps_data, 2);
-		if (rc) {
-			dev_err(&di->i2c->dev, "read PS data failed\n");
+	int rc, val;
+	char encalibration_flag = 0 ;
+	 int adc_value = 0 ;
+	uint16_t report_lux=0;	
+	void __user *argp = (void __user *)arg;
+	/*D("[ap3426] %s cmd %d\n", __func__, _IOC_NR(cmd));*/
+	switch (cmd) {
+	case LIGHTSENSOR_IOCTL_ENABLE:
+		if (get_user(val, (unsigned long __user *)arg)) {
+			rc = -EFAULT;
 			break;
 		}
-		if (min > ((ps_data[1] << 8) | ps_data[0]))
-			min = (ps_data[1] << 8) | ps_data[0];
-	}
+		printk("[LS][AP3426] %s LIGHTSENSOR_IOCTL_ENABLE, value = %d\n",
+			__func__, val);
 
-	if (!count) {
-		if (min > (PS_DATA_MASK >> 1)) {
-			dev_err(&di->i2c->dev, "ps data out of range, check if shield\n");
-			rc = -EINVAL;
-			goto exit_disable_ps;
-		}
+		rc = val ? ap3426_lsensor_enable(private_pl_data -> client) : ap3426_lsensor_disable(private_pl_data -> client);
+		break;
+	case LIGHTSENSOR_IOCTL_GET_ENABLED:
+		val = misc_ls_opened;
+	   	printk("[LS][AP3426] %s LIGHTSENSOR_IOCTL_GET_ENABLED, enabled %d\n",
+			__func__, val);
 
-		if (apply_now) {
-			ps_data[0] = PS_LOW_BYTE(min);
-			ps_data[1] = PS_HIGH_BYTE(min);
-			rc = regmap_bulk_write(di->regmap, AP3426_REG_PS_CAL_L,
-					ps_data, 2);
-			if (rc) {
-				dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-						AP3426_REG_PS_CAL_L, rc);
-				goto exit_disable_ps;
+		rc = put_user(val, (unsigned long __user *)arg);
+		break;
+	//<----------- ASUS-Bevis_Chen + --------------->
+	/*case ASUS_LIGHTSENSOR_IOCTL_START:	
+	        printk("%s:ASUS ASUS_LIGHTSENSOR_IOCTL_START  \n", __func__);
+	        break;
+	case ASUS_LIGHTSENSOR_IOCTL_CLOSE:				
+	 	  printk("%s:ASUS ASUS_LIGHTSENSOR_IOCTL_CLOSE \n", __func__);
+	        break;*/
+	case ASUS_LIGHTSENSOR_IOCTL_GETDATA:
+        	printk("%s:ASUS ASUS_LIGHTSENSOR_IOCTL_GETDATA \n", __func__);
+		rc = 0 ;
+		
+       		 adc_value = ap3426_get_adc_value(private_pl_data -> client);
+
+		 report_lux = (uint16_t)adc_value;		
+		if(EnLSensorConfig_flag == 1 ){//calibration enable 
+			if(lSensor_CALIDATA[0] > 0&&lSensor_CALIDATA[1] > 0 
+  	        	&&lSensor_CALIDATA[1] >lSensor_CALIDATA[0] ){ //in case of zero divisor error
+                            
+            	printk("AP3426---Before calibration, ASUS_LIGHTSENSOR_IOCTL_GETDATA,  report_lux is %d\n", report_lux);
+				//report_lux = calibration_light_ap3426(lSensor_CALIDATA[1], lSensor_CALIDATA[0], report_lux * 100 / ( 6553600/ap3426_get_range(private_pl_data -> client)));
+				report_lux = calibration_light_ap3426(lSensor_CALIDATA[1], lSensor_CALIDATA[0], report_lux);
+				report_lux =report_lux * 100 / ( 6553600/ap3426_get_range(private_pl_data -> client));//sensitivity =0.1309 
+				printk("AP3426---After calibration, ASUS_LIGHTSENSOR_IOCTL_GETDATA, report_lux is %d\n", report_lux);
+            }else{
+				rc = -EINVAL;
+				printk("%s:ASUS input lSensor_CALIDATA was invalid .error !!!!!\n",__func__);
 			}
-			di->bias = min;
+		}else{
+#ifndef CONFIG_ASUS_FACTORY_SENSOR_MODE // in user build and no calibration data			   
+        		report_lux = report_lux*7;
+			printk("AP3426--- NO calibration data, use default config\n"); 
+#else
+	        printk("AP3426--- NO calibration data, Factory branch , NO default config\n"); 	
+#endif // end of CONFIG_ASUS_FACTORY_SENSOR_MODE				
+			report_lux = report_lux * 100 / ( 6553600/ap3426_get_range(private_pl_data -> client));//sensitivity =0.1309  
+			printk("AP3426---After convertion to lux, ASUS_LIGHTSENSOR_IOCTL_GETDATA, report_lux is %d\n", report_lux);
 		}
 
-		snprintf(di->calibrate_buf, sizeof(di->calibrate_buf), "0,0,%d",
-				min);
-		dev_dbg(&di->i2c->dev, "result: %s\n", di->calibrate_buf);
-	} else {
-		dev_err(&di->i2c->dev, "calibration failed\n");
+        if ( copy_to_user(argp, &report_lux, sizeof(report_lux) ) ) {
+        	printk("%s:ASUS failed to copy lightsense data to user space.\n",__func__);
+            rc = -EFAULT;			
+            goto end;
+	    }		
+		printk("%s:ASUS_LIGHTSENSOR_IOCTL_GETDATA end\n", __func__);
+		break;
+	case ASUS_LIGHTSENSOR_SETCALI_DATA:
+
+		printk("%s:ASUS ASUS_LIGHTSENSOR_SETCALI_DATA \n", __func__);
+		rc = 0 ;
+		memset(lSensor_CALIDATA, 0, 2*sizeof(int));
+
+		if (copy_from_user(lSensor_CALIDATA, argp, sizeof(lSensor_CALIDATA)))
+		{
+			rc = -EFAULT;
+			goto end;
+		}	
+
+		printk("%s:ASUS_LIGHTSENSOR SETCALI_DATA : lSensor_CALIDATA[0] :  %d ,lSensor_CALIDATA[1]:  %d \n", 
+			__func__, lSensor_CALIDATA[0],lSensor_CALIDATA[1]);
+
+		if(lSensor_CALIDATA[0] <= 0||lSensor_CALIDATA[1] <= 0 
+			||lSensor_CALIDATA[0] >= lSensor_CALIDATA[1] )
+			rc =  -EINVAL;
+
+
+		break;
+	case ASUS_LIGHTSENSOR_EN_CALIBRATION:
+		printk("%s:ASUS ASUS_LIGHTSENSOR_EN_CALIBRATION \n", __func__);
+		rc = 0 ;
+		if (copy_from_user(&encalibration_flag , argp, sizeof(encalibration_flag )))
+		{
+			rc = -EFAULT;
+			goto end;
+		}	
+		EnLSensorConfig_flag =  encalibration_flag ;
+
+		printk("%s: ASUS_LIGHTSENSOR_EN_CALIBRATION : EnLSensorConfig_flag is : %d  \n",__func__,EnLSensorConfig_flag); 
+		break;		
+	//<----------- ASUS-Bevis_Chen - ------------->
+
+	default:
+		pr_err("[LS][AP3426 error]%s: invalid cmd %d\n", __func__, _IOC_NR(cmd));
 		rc = -EINVAL;
 	}
 
-exit_disable_ps:
-	rc = regmap_write(di->regmap, AP3426_REG_CONFIG, config & (~0x02));
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-				AP3426_REG_CONFIG, rc);
-		goto exit_enable_interrupt;
-	}
-
-exit_enable_interrupt:
-	if (regmap_write(di->regmap, AP3426_REG_INT_CTL, interrupt)) {
-		dev_err(&di->i2c->dev, "enable interrupt failed\n");
-		goto exit_power_off;
-	}
-
-exit_power_off:
-	if (!power) {
-		if (sensor_power_config(&di->i2c->dev, power_config,
-					ARRAY_SIZE(power_config), false)) {
-			dev_err(&di->i2c->dev, "power off sensor failed.\n");
-			goto exit;
-		}
-	}
-exit:
-	mutex_unlock(&di->ops_lock);
-	return rc;
+end:
+	
+    return rc;
 }
 
-static int ap3426_cdev_ps_write_cal(struct sensors_classdev *sensors_cdev,
-		struct cal_result_t *cal_result)
-{
-	int power;
-	u8 ps_data[2];
-	int rc;
-	struct ap3426_data *di = container_of(sensors_cdev,
-			struct ap3426_data, ps_cdev);
 
-	mutex_lock(&di->ops_lock);
-	power = di->power_enabled;
-	if (!power) {
-		rc = sensor_power_config(&di->i2c->dev, power_config,
-					ARRAY_SIZE(power_config), true);
-		if (rc) {
-			dev_err(&di->i2c->dev, "power up sensor failed.\n");
-			goto exit;
-		}
-	}
-
-	di->bias = cal_result->bias;
-	ps_data[0] = PS_LOW_BYTE(cal_result->bias);
-	ps_data[1] = PS_HIGH_BYTE(cal_result->bias);
-	rc = regmap_bulk_write(di->regmap, AP3426_REG_PS_CAL_L,
-			ps_data, 2);
-	if (rc) {
-		dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-				AP3426_REG_PS_CAL_L, rc);
-		goto exit_power_off;
-	}
-
-	snprintf(di->calibrate_buf, 10, "0,0,%d", di->bias);
-
-exit_power_off:
-	if (!power) {
-		if (sensor_power_config(&di->i2c->dev, power_config,
-					ARRAY_SIZE(power_config), false)) {
-			dev_err(&di->i2c->dev, "power off sensor failed.\n");
-			goto exit;
-		}
-	}
-exit:
-
-	mutex_unlock(&di->ops_lock);
-	return 0;
+static const struct file_operations lsensor_fops = {
+	.owner = THIS_MODULE,
+	.open = lsensor_open,
+	.release = lsensor_release,
+	.unlocked_ioctl = lsensor_ioctl
 };
 
-static ssize_t ap3426_register_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	struct ap3426_data *di = dev_get_drvdata(dev);
-	unsigned int val;
-	int rc;
-	ssize_t count = 0;
-	int i;
+static struct miscdevice lsensor_misc_ap3426 = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "lightsensor",
+	.fops = &lsensor_fops
+};
 
-	if (di->reg_addr == AP3426_REG_MAGIC) {
-		for (i = 0; i < AP3426_REG_COUNT; i++) {
-			rc = regmap_read(di->regmap, AP3426_REG_CONFIG + i,
-					&val);
-			if (rc) {
-				dev_err(&di->i2c->dev, "read %d failed\n",
-						AP3426_REG_CONFIG + i);
-				break;
+
+static int ap3426_register_lsensor_device(struct i2c_client *client, struct ap3426_data *data)
+{
+    struct input_dev *input_dev;
+    int rc;
+
+    LDBG("allocating input device lsensor\n");
+    input_dev = input_allocate_device();
+    if (!input_dev) {
+	dev_err(&client->dev,"%s: could not allocate input device for lsensor\n", __FUNCTION__);
+	rc = -ENOMEM;
+	goto done;
+    }
+    data->lsensor_input_dev = input_dev;
+    input_set_drvdata(input_dev, data);
+    input_dev->name = "AP3426LightSensor-level";
+    input_dev->dev.parent = &client->dev;
+    set_bit(EV_ABS, input_dev->evbit);
+    input_set_abs_params(input_dev, ABS_MISC, 0, 8, 0, 0);
+
+    rc = input_register_device(input_dev);
+    if (rc < 0) {
+	pr_err("%s: could not register input device for lsensor\n", __FUNCTION__);
+	goto done;
+    }
+
+	rc = misc_register(&lsensor_misc_ap3426);
+
+	if (rc < 0) {
+		pr_err( "[PS][AP3426 error]%s: could not register ps misc device\n", __func__);
+	goto done;
+    }
+done:
+    return rc;
+}
+
+
+static void ap3426_unregister_lsensor_device(struct i2c_client *client, struct ap3426_data *data)
+{
+    input_unregister_device(data->lsensor_input_dev);
+}
+static int ap3426_register_heartbeat_sensor_device(struct i2c_client *client, struct ap3426_data *data)
+{
+    struct input_dev *input_dev;
+    int rc;
+
+    LDBG("allocating input device heartbeat sensor\n");
+    input_dev = input_allocate_device();
+    if (!input_dev) {
+	dev_err(&client->dev,"%s: could not allocate input device for heartbeat sensor\n", __FUNCTION__);
+	rc = -ENOMEM;
+	goto done;
+    }
+    data->hsensor_input_dev = input_dev;
+    input_set_drvdata(input_dev, data);
+    input_dev->name = "heartbeat";
+    input_dev->dev.parent = &client->dev;
+    set_bit(EV_ABS, input_dev->evbit);
+    input_set_abs_params(input_dev, ABS_WHEEL, 0, 8, 0, 0);
+
+    rc = input_register_device(input_dev);
+    if (rc < 0) {
+	pr_err("%s: could not register input device for heartbeat sensor\n", __FUNCTION__);
+	goto done;
+    }
+done:
+    return rc;
+}
+
+static void ap3426_unregister_heartbeat_device(struct i2c_client *client, struct ap3426_data *data)
+{
+    input_unregister_device(data->hsensor_input_dev);
+}
+
+static void ap3426_change_ls_threshold(struct i2c_client *client)
+{
+    struct ap3426_data *data = i2c_get_clientdata(client);
+    int value;
+	int i,lowTH,highTH,temp=10;
+    value = ap3426_get_adc_value(client);
+	//pr_err( "[	LS]anna adc  value=%d \n",value);
+    if(value > 100){
+
+		for (i=1;i<10;i++)
+		{
+			if(value <=ap3426_threshole[i])break;
+		}
+		temp = temp *i;
+	
+		if(value >(0xffff -(9*temp*3)) ){
+			highTH = 0xffff ;
+			lowTH = value -temp*3;
+		}else{
+			if(i ==8 ){
+				//printk( "[	LS]anna adc  temp=%d \n",temp);
+				temp =  temp*2 ;//need big 
+			}else if(i ==9){
+				temp =  temp*3;
 			}
-			count += snprintf(&buf[count], PAGE_SIZE,
-					"0x%x: 0x%x\n", AP3426_REG_CONFIG + i,
-					val);
+			
+			highTH = value + temp;
+			lowTH = value -temp;
+			
+			if(lowTH < 100 ){  
+				lowTH = 100;
+			}
 		}
-	} else {
-		rc = regmap_read(di->regmap, di->reg_addr, &val);
-		if (rc) {
-			dev_err(&di->i2c->dev, "read %d failed\n",
-					di->reg_addr);
-			return rc;
+		
+    }
+    else if((value>40)&&(value <= 100)){
+
+		lowTH  = value -5;
+		highTH = value+ 5;
+		if(lowTH<40) lowTH = 40;
+		if(highTH > 100)highTH =100;
+    }else{
+		if(value <= 1){
+			lowTH = 0;
+		}else{
+			lowTH  = value -1;
 		}
-		count += snprintf(&buf[count], PAGE_SIZE, "0x%x:0x%x\n",
-				di->reg_addr, val);
+		highTH =value+ 1;
 	}
+	//pr_err( "[	LS]anna adc  lowTH=%d \n",lowTH);
+	//pr_err( "[	LS]anna adc  highTH=%d \n",highTH);
+	ap3426_set_althres(client,lowTH);
+	ap3426_set_ahthres(client,highTH);
+
+	if(EnLSensorConfig_flag == 1 ){//calibration enable 
+		if(lSensor_CALIDATA[0] > 0&&lSensor_CALIDATA[1] > 0 
+  	        	&&lSensor_CALIDATA[1] >lSensor_CALIDATA[0] ){ //in case of zero divisor error
+                            
+//            printk("AP3426---Before calibration, ASUS_LIGHTSENSOR_IOCTL_GETDATA,  report_lux is %d\n", value);
+		//pr_err( "[	LS]anna ADC  value=%d \n",value);
+		//pr_err( "[LS]anna LUX  value=%d \n", value * 100 / ( 6553600/ap3426_get_range(private_pl_data -> client)));
+           	 value = calibration_light_ap3426(lSensor_CALIDATA[1], lSensor_CALIDATA[0], value);
+		//pr_err( "[	LS]anna EnLSensorConfig_flag  LUX value=%d \n",value);
+		 value =value * 100 / ( 6553600/ap3426_get_range(private_pl_data -> client));//sensitivity =0.1309  
+		// pr_err( "[	LS]anna end  LUX value=%d \n",value);
+//            printk("AP3426---After calibration, ASUS_LIGHTSENSOR_IOCTL_GETDATA, report_lux is %d\n", value);
+
+        	}else{
+//			printk("%s:ASUS input lSensor_CALIDATA was invalid .error !!!!!\n",__func__);
+		}
+	}else{
+#ifndef CONFIG_ASUS_FACTORY_SENSOR_MODE // in user build and no calibration data			   
+//        value = value*15;
+//		printk("AP3426--- NO calibration data, use default config\n"); 
+#else
+//	    printk("AP3426--- NO calibration data, Factory branch , NO default config\n"); 	
+#endif // end of CONFIG_ASUS_FACTORY_SENSOR_MODE				
+		value = value * 100 / ( 6553600/ap3426_get_range(private_pl_data -> client))*(2000/30)/10;
+		//pr_err( "[	LS]anna EnLSensorConfig_flag=0  value=%d \n",value);
+//		printk("AP3426---After convertion to lux, ASUS_LIGHTSENSOR_IOCTL_GETDATA, report_lux is %d\n", report_lux);
+
+	}
+
+	/*if (data->once_ls_opened) {
+		if (value % 2 == 1)
+			value -= 1;
+		if (value == data->last_initial_report_lux)
+			value += 2;
+		data->last_initial_report_lux = value;
+		data->once_ls_opened--;
+	}
+	else { */
+		if (value % 2 == 0)
+			value += 1;
+	//}
+	//pr_err( "[	LS]anna irq LUX=%d \n",value);
+    input_report_abs(data->lsensor_input_dev, ABS_MISC, value);
+    input_sync(data->lsensor_input_dev);
+
+}
+
+static int ap3426_psensor_enable(struct i2c_client *client)
+{
+    int ret = 0,mode;
+
+    mode = ap3426_get_mode(client);
+	//printk("%s:anna ASUS_PSENSOR test : mode =%d\n", __func__,mode );
+    if((mode & AP3426_SYS_PS_ENABLE) == 0){
+	mode |= AP3426_SYS_PS_ENABLE;
+	
+	ret = ap3426_set_mode(client,mode);
+	
+    }
+
+    return ret;
+}
+
+static int ap3426_psensor_disable(struct i2c_client *client)
+{
+    int ret = 0,mode;
+    mode = ap3426_get_mode(client);
+    if(mode & AP3426_SYS_PS_ENABLE){
+	mode &= ~AP3426_SYS_PS_ENABLE;
+	if(mode == AP3426_SYS_DEV_RESET)
+	    mode = AP3426_SYS_DEV_DOWN;
+	ret = ap3426_set_mode(client,mode);
+    }
+    return ret;
+}
+
+
+static int psensor_open(struct inode *inode, struct file *file)
+{
+	printk("[PS][AP3426] %s\n", __func__);
+	if (private_pl_data -> ps_opened)
+		return -EBUSY;
+
+	private_pl_data -> ps_opened = 1;
+	return 0;
+}
+
+static int psensor_release(struct inode *inode, struct file *file)
+{
+	printk("[PS][AP3426] %s\n", __func__);
+	private_pl_data -> ps_opened = 0;
+
+//	return ap3426_psensor_disable(private_pl_data -> client);
+	return 0;
+}
+
+
+static ssize_t ap3426_adc_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int value;
+	int ret;
+	struct  ap3426_data *data = private_pl_data;
+	int intr_val;
+
+	ap3426_psensor_enable(data->client);//anna;
+	intr_val = gpio_get_value(data->gpioNum);
+	value = ap3426_get_px_value(data->client); 
+       ret = sprintf(buf, "ADC[0x%04X], ENABLE = %d, intr_pin = %d\n", value,misc_ps_opened, intr_val);
+	return ret;
+}
+
+static ssize_t ap3426_enable_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct  ap3426_data *data = private_pl_data;
+    int ps_en; 
+	ps_en = -1;
+	sscanf(buf, "%d", &ps_en);
+
+	if (ps_en != 0 && ps_en != 1
+		&& ps_en != 10 && ps_en != 13 && ps_en != 16)
+		return -EINVAL;
+
+
+	if (ps_en) {
+		pr_err("[PS][ap3426] %s: ps_en=%d\n", __func__, ps_en);
+		ap3426_psensor_enable(data->client);//anna
+	}else{
+		ap3426_psensor_disable(data->client);
+    }
+
+	pr_err("[PS][ap3426] %s\n", __func__);
 
 	return count;
 }
 
-static ssize_t ap3426_register_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct ap3426_data *di = dev_get_drvdata(dev);
-	unsigned int reg;
-	unsigned int val;
-	unsigned int cmd;
-	int rc;
+static DEVICE_ATTR(ps_adc, 0664, ap3426_adc_show, ap3426_enable_store);
 
-	if (sscanf(buf, "%u %u %u\n", &cmd, &reg, &val) < 2) {
-		dev_err(&di->i2c->dev, "argument error\n");
+static long psensor_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	int val;
+	int rc ;
+	uint16_t px_value;
+	int ret;
+	char enPcalibration_flag = 0 ;
+	void __user *argp = (void __user *)arg;
+	printk("[PS][AP3426] %s cmd %d\n", __func__, _IOC_NR(cmd));
+
+	switch (cmd) {
+	case PROXIMITYSENSOR_IOCTL_ENABLE:
+		if (get_user(val, (unsigned long __user *)arg))
+			return -EFAULT;
+
+		if (val){
+			return ap3426_psensor_enable(private_pl_data -> client);
+		}else{
+			return ap3426_psensor_disable(private_pl_data -> client);
+		}
+
+		break;
+	case PROXIMITYSENSOR_IOCTL_GET_ENABLED:
+		return put_user(misc_ps_opened, (unsigned long __user *)arg);
+		break;
+	case ASUS_PSENSOR_IOCTL_GETDATA:
+		printk("%s:ASUS ASUS_PSENSOR_IOCTL_GETDATA \n", __func__);
+		rc = 0 ;
+		
+		ret = ap3426_get_px_value(private_pl_data -> client);
+		if (ret < 0) {
+			printk("%s:ASUS failed to get_px_value. \n",__func__);
+			rc = -EIO;
+			goto pend;
+		}
+
+		px_value = (uint16_t)ret;
+		if ( copy_to_user(argp, &px_value, sizeof(px_value) ) ) {
+	     		printk("%s:ASUS failed to copy psense data to user space.\n",__func__);
+			rc = -EFAULT;			
+			goto pend;
+	    	}		
+
+		printk("%s:ASUS_PSENSOR_IOCTL_GETDATA end\n", __func__);
+		break;
+	case ASUS_PSENSOR_SETCALI_DATA:
+		printk("%s:ASUS ASUS_PSENSOR_SETCALI_DATA \n", __func__);
+		rc = 0 ;
+		memset(pSensor_CALIDATA, 0, 2*sizeof(int));
+		if (copy_from_user(pSensor_CALIDATA, argp, sizeof(pSensor_CALIDATA))){
+			rc = -EFAULT;
+			goto pend;
+		}	
+
+		printk("%s:ASUS_PSENSOR SETCALI_DATA : pSensor_CALIDATA[0] :  %d ,pSensor_CALIDATA[1]:  %d \n", 
+			__func__, pSensor_CALIDATA[0],pSensor_CALIDATA[1]);
+
+		if( (pSensor_CALIDATA[1] == 0) && ( pSensor_CALIDATA[0] >= 0  && pSensor_CALIDATA[0] < 512 ) ) {
+
+			ap3426_set_plthres(private_pl_data -> client,246);//5m
+			ap3426_set_phthres(private_pl_data -> client,622);//3
+			
+			if (ap3426_set_crosstalk(private_pl_data -> client, pSensor_CALIDATA[0])) {
+				rc = -EFAULT;
+				pr_err("[PS][AP3426 error]%s: ap3426_set_plthres error\n", __func__);
+				goto pend;
+			}
+			goto pend;
+		}
+
+		if(pSensor_CALIDATA[0] <= 0||pSensor_CALIDATA[1] <= 0 
+			||pSensor_CALIDATA[0] <= pSensor_CALIDATA[1] ) {
+			rc =  -EINVAL;
+			goto pend;
+		}
+
+		if (ap3426_set_plthres(private_pl_data -> client, pSensor_CALIDATA[1])) {
+			rc = -EFAULT;
+			pr_err("[PS][AP3426 error]%s: ap3426_set_plthres error\n", __func__);
+			goto pend;
+		}
+		
+	 	if (ap3426_set_phthres(private_pl_data -> client, pSensor_CALIDATA[0])) {
+			rc = -EFAULT;
+			pr_err("[PS][AP3426 error]%s: ap3426_set_phthres error\n", __func__);
+			goto pend;
+		}
+		break;
+
+	case ASUS_PSENSOR_EN_CALIBRATION:
+		printk("%s:ASUS ASUS_PSENSOR_EN_CALIBRATION \n", __func__);
+		rc = 0 ;
+		if (copy_from_user(&enPcalibration_flag , argp, sizeof(enPcalibration_flag ))){
+			rc = -EFAULT;
+			goto pend;
+		}	
+		EnPSensorConfig_flag =  enPcalibration_flag ;
+		if(EnPSensorConfig_flag == 0){
+			
+			ap3426_set_crosstalk(private_pl_data -> client, EnPSensorConfig_flag);
+		}
+		
+		printk("%s: ASUS_PSENSOR_EN_CALIBRATION : EnPSensorConfig_flag is : %d  \n",__func__,EnPSensorConfig_flag); 
+		break;		
+	//<----------- ASUS-Bevis_Chen - ------------->
+	default:
+		pr_err("[PS][AP3426 error]%s: invalid cmd %d\n",
+			__func__, _IOC_NR(cmd));
 		return -EINVAL;
 	}
 
-	if (cmd == CMD_WRITE) {
-		rc = regmap_write(di->regmap, reg, val);
-		if (rc) {
-			dev_err(&di->i2c->dev, "write %d failed\n", reg);
-			return rc;
-		}
-	} else if (cmd == CMD_READ) {
-		di->reg_addr = reg;
-		dev_dbg(&di->i2c->dev, "register address set to 0x%x\n", reg);
-	}
-
-	return size;
+	pend:
+ 		return rc;
 }
 
-static DEVICE_ATTR(register, S_IWUSR | S_IRUGO,
-		ap3426_register_show,
-		ap3426_register_store);
+static const struct file_operations psensor_fops = {
+	.owner = THIS_MODULE,
+	.open = psensor_open,
+	.release = psensor_release,
+	.unlocked_ioctl = psensor_ioctl
+};
 
-static struct attribute *ap3426_attr[] = {
-	&dev_attr_register.attr,
-	NULL
+struct miscdevice psensor_misc_ap3426 = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "cm3602",
+	.fops = &psensor_fops
+};
+
+
+static int ap3426_register_psensor_device(struct i2c_client *client, struct ap3426_data *data)
+{
+    struct input_dev *input_dev;
+    int rc;
+
+    LDBG("allocating input device psensor\n");
+    input_dev = input_allocate_device();
+    if (!input_dev) {
+	dev_err(&client->dev,"%s: could not allocate input device for psensor\n", __FUNCTION__);
+	rc = -ENOMEM;
+	goto done;
+    }
+    data->psensor_input_dev = input_dev;
+    input_set_drvdata(input_dev, data);
+    input_dev->name = "proximity";
+    input_dev->dev.parent = &client->dev;
+    set_bit(EV_ABS, input_dev->evbit);
+    input_set_abs_params(input_dev, ABS_DISTANCE, 0, 1, 0, 0);
+
+    rc = input_register_device(input_dev);
+    if (rc < 0) {
+	pr_err("%s: could not register input device for psensor\n", __FUNCTION__);
+	goto done;
+    }
+
+    rc = misc_register(&psensor_misc_ap3426);
+
+    if (rc < 0) {
+    	pr_err( "[PS][AP3426 error]%s: could not register ps misc device\n", __func__);
+ 	goto done;
+    }
+
+    return 0;
+
+done:
+    return rc;
+}
+
+static void ap3426_unregister_psensor_device(struct i2c_client *client, struct ap3426_data *data)
+{
+    input_unregister_device(data->psensor_input_dev);
+}
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static struct early_suspend ap3426_early_suspend;
+static void ap3426_suspend_early(struct early_suspend *h)
+{
+
+   // if (misc_ps_opened)
+//	ap3426_psensor_disable(private_pl_data -> client);
+	LDBG("ap3426:  ap3426_suspend_early\n");
+    if (misc_ls_opened){
+	 ap3426_lsensor_disable(private_pl_data -> client);
+	 private_pl_data ->lsensor_sleep_becuz_early_suspend = 1;
+    }
+}
+
+static void ap3426_resume_early(struct early_suspend *h)
+{
+	LDBG("ap3426:  ap3426_resume_early\n");
+	
+    if ((!misc_ls_opened) && private_pl_data ->lsensor_sleep_becuz_early_suspend){
+	 ap3426_lsensor_enable(private_pl_data -> client);
+	 private_pl_data ->lsensor_sleep_becuz_early_suspend = 0;
+    }
+    
+	
+  //  if (misc_ps_opened)
+//	ap3426_psensor_enable(private_pl_data -> client);
+}
+#endif
+
+
+
+
+
+static int ap3426_suspend_normal(struct device *dev)
+{   
+	struct ap3426_data *data = private_pl_data;
+	int status_calling = misc_ps_opened; //<asus-wx20150429>
+   	 LDBG("ap3426:  ap3426_suspend_normal\n");
+	data->status_calling = status_calling; //<asus-wx20150429+>
+
+	if (status_calling) {
+	
+		enable_irq_wake(data->irq);
+	}
+
+	 if (misc_ls_opened){
+	 	ap3426_lsensor_disable(private_pl_data -> client);
+	 	private_pl_data ->lsensor_sleep_becuz_early_suspend = 1;
+    	}
+	
+	return 0;
+}
+
+
+static int ap3426_resume_normal(struct device *dev)
+{
+	struct ap3426_data *data = private_pl_data;
+	int status_calling = data->status_calling; 
+        LDBG("ap3426:  ap3426_resume_normal\n");
+
+	if (status_calling) {
+		if (proximity_state == 0) {
+			wake_lock_timeout(&(data->ps_wake_lock), 1 * HZ);
+		}
+		disable_irq_wake(data->irq);
+	}
+ 
+   if ((!misc_ls_opened) && private_pl_data ->lsensor_sleep_becuz_early_suspend){
+	 	ap3426_lsensor_enable(private_pl_data -> client);
+		 private_pl_data ->lsensor_sleep_becuz_early_suspend = 0;
+    }
+  	return 0;
+}
+
+/* range */
+static ssize_t ap3426_show_range(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    return sprintf(buf, "%i\n", ap3426_get_range(data->client));
+}
+
+static ssize_t ap3426_store_range(struct device *dev,
+	struct device_attribute *attr,
+	const char *buf, size_t count)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    unsigned long val;
+    int ret;
+
+    if ((strict_strtoul(buf, 10, &val) < 0) || (val > 3))
+	return -EINVAL;
+
+    ret = ap3426_set_range(data->client, val);
+    if (ret < 0)
+	return ret;
+
+    return count;
+}
+
+static DEVICE_ATTR(range, S_IWUSR | S_IRUGO,
+	ap3426_show_range, ap3426_store_range);
+
+
+
+/* mode */
+static ssize_t ap3426_show_mode(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    return sprintf(buf, "%d\n", ap3426_get_mode(data->client));
+}
+
+static ssize_t ap3426_store_mode(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    unsigned long val;
+    int ret;
+	int lastmode;
+	int pl_enabled;
+
+	disable_irq_nosync(data->client->irq);
+
+    if ((strict_strtoul(buf, 10, &val) < 0) || (val % 10 > 7) || (val / 10 > 2))
+    	{
+		return -EINVAL;
+    	}
+	
+	pl_enabled = val / 10;
+	val %= 10;
+	lastmode = ap3426_get_mode(data->client);
+        ret = ap3426_set_mode(data->client, val);
+    if (ret < 0)
+	return ret;
+/* <anna -->
+    if ((pl_enabled == 2) && (val & AP3426_SYS_PS_ENABLE)) {
+		data->once_ps_opened = 1;
+    }
+	else {
+		data->once_ps_opened = 0;
+	}
+    if (((lastmode & AP3426_SYS_ALS_ENABLE) == 0)
+		&& ((val & AP3426_SYS_ALS_ENABLE) == 1)){
+		data->once_ls_opened = 1;
+    }
+    if (((lastmode & AP3426_SYS_ALS_ENABLE) == 1)
+		&& ((val & AP3426_SYS_ALS_ENABLE) == 0)){
+		data->once_ls_opened = 0;
+    }
+    */
+	enable_irq(data->client->irq);
+/*
+	LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
+    ret = mod_timer(&data->pl_timer, jiffies + msecs_to_jiffies(PL_TIMER_DELAY));
+
+    if(ret) 
+	LDBG("Timer Error\n");
+	*/
+    return count;
+}
+
+static DEVICE_ATTR(mode, S_IRUGO | S_IWUSR | S_IWGRP,
+	ap3426_show_mode, ap3426_store_mode);
+static int ap3426_hs_init(struct i2c_client *client)
+{
+    int ret;
+
+    //LDBG("Init HS \n");
+    ret = __ap3426_write_reg(client, AP3426_REG_PS_CONF,
+        AP3426_REG_PS_CONF_MASK, AP3426_REG_PS_CONF_SHIFT, 0);
+    ret = __ap3426_write_reg(client, AP3426_REG_PS_DC_1,
+        AP3426_REG_PS_DC_1_MASK, AP3426_REG_PS_DC_1_SHIFT, 0);
+    ret = __ap3426_write_reg(client, AP3426_REG_PS_DC_2,
+        AP3426_REG_PS_DC_2_MASK, AP3426_REG_PS_DC_2_SHIFT, 0);
+    ret = __ap3426_write_reg(client, AP3426_REG_PS_LEDD,
+        AP3426_REG_PS_LEDD_MASK, AP3426_REG_PS_LEDD_SHIFT, 1);
+    ret = __ap3426_write_reg(client, AP3426_REG_PS_MEAN,
+        AP3426_REG_PS_MEAN_MASK, AP3426_REG_PS_MEAN_SHIFT, 0);
+    ret = __ap3426_write_reg(client, AP3426_REG_PS_PERSIS,
+        AP3426_REG_PS_PERSIS_MASK, AP3426_REG_PS_PERSIS_SHIFT, 0);
+  //  ret = ap3426_set_plthres(client, 0);
+  //  ret = ap3426_set_phthres(client, 535);
+  //  ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
+   //     AP3426_REG_SYS_INT_PS_MASK, 0x00, AP3426_SYS_PS_ENABLE);
+    if(ret < 0)
+        LDBG("Init HS Failed\n");
+
+    return ret;
+}
+static int ap3426_ps_init(struct i2c_client *client)
+{
+    int ret;
+
+    //LDBG("Init PS \n");
+   // ret = ap3426_set_plthres(client, 100);
+  //  ret = ap3426_set_phthres(client, 500);
+    ret = __ap3426_write_reg(client, AP3426_REG_PS_LEDD,
+        AP3426_REG_PS_LEDD_MASK, AP3426_REG_PS_LEDD_SHIFT, 0x02);
+    ret = __ap3426_write_reg(client, AP3426_REG_PS_MEAN,
+        AP3426_REG_PS_MEAN_MASK, AP3426_REG_PS_MEAN_SHIFT, 0);
+ //   ret = __ap3426_write_reg(client, AP3426_REG_PS_INTEGR,
+   //     AP3426_REG_PS_INTEGR_MASK, AP3426_REG_PS_INTEGR_SHIFT, 0x08);
+    ret = __ap3426_write_reg(client, AP3426_REG_SYS_INTCTRL,0xFF, 0x00, 0x89);
+ //   ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
+   //     AP3426_REG_SYS_INT_PS_MASK, 0x00, AP3426_SYS_PS_ENABLE);
+  ret = __ap3426_write_reg(client, AP3426_REG_PS_CONF, 
+        AP3426_REG_PS_CONF_MASK, AP3426_REG_PS_CONF_SHIFT, 0);
+ 
+    if(ret < 0)
+        LDBG("Init PS Failed\n");
+
+    return ret;
+}
+static int ap3426_als_init(struct i2c_client *client)
+{
+    int ret;
+
+    //LDBG("Init ALS \n");
+    ret = ap3426_set_althres(client, 5000);
+    ret = ap3426_set_ahthres(client, 13000);
+   // ret = ap3426_set_range(client, AP3426_ALS_RANGE_2);
+    ret = __ap3426_write_reg(client, AP3426_REG_SYS_INTCTRL,0xFF, 0x00, 0x89);
+    ret = __ap3426_write_reg(client, AP3426_REG_SYS_CONF,
+        AP3426_REG_SYS_INT_AL_MASK, 0x00, AP3426_SYS_ALS_ENABLE);
+    //ret = __ap3426_write_reg(client, AP3426_REG_ALS_PERSIS,0xFF, 0x00, 0x2); 
+ 
+    if(!ret < 0)
+        LDBG("Init ALS Failed\n");
+
+    return ret;
+}
+
+static ssize_t ap3426_ls_enable(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct ap3426_data *data = private_pl_data;
+    unsigned long mode;
+    int ret;
+
+    //LDBG("mode = %s,%s\n", __func__,buf);
+    if (strict_strtoul(buf, 10, &mode) < 0)
+	return -EINVAL;
+
+    data -> old_mode = ap3426_get_mode(data->client);
+    if(mode == AP3426_SYS_ALS_ENABLE && data -> old_mode == AP3426_SYS_PS_ENABLE) {
+        ret = ap3426_ps_init(data->client);
+        ret = ap3426_als_init(data->client);
+        if (ret < 0)
+            return ret;
+        misc_ls_opened = 1;
+        misc_ps_opened = 1;
+    } else if(mode == AP3426_SYS_ALS_ENABLE && data -> old_mode == AP3426_SYS_DEV_DOWN){
+        ret = ap3426_als_init(data->client);
+        if (ret < 0)
+            return ret;
+        misc_ls_opened = 1;
+        misc_ps_opened = 0;
+    } else if (mode == AP3426_SYS_DEV_DOWN){
+        if(data -> old_mode != AP3426_SYS_ALS_PS_ENABLE) {
+            ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+                AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
+            ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+                AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_DOWN);
+            misc_ls_opened = 0;
+            misc_ps_opened = 0;
+        }else{
+            ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+                AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_PS_ENABLE);
+            misc_ls_opened = 0;
+            misc_ps_opened = 1;
+        }
+    }
+    data -> old_mode = ap3426_get_mode(data->client);
+#ifndef INTERRUPT_MODE
+    //LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
+    #ifdef HR_TIMER
+        ret = hrtimer_start( &hr_timer, ktime, HRTIMER_MODE_REL );
+    #else
+        ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));     
+    #endif
+    if(!ret) 
+	   LDBG("Timer Error\n");
+#endif
+
+    return count;
+}
+
+
+static ssize_t ap3426_ps_enable(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct ap3426_data *data = private_pl_data;
+    unsigned long mode;
+    int ret;    
+
+    //LDBG("mode = %s,%s\n", __func__,buf);
+    if (strict_strtoul(buf, 10, &mode) < 0)
+	return -EINVAL;
+
+    mutex_lock(&ap3426_ps_lock);
+
+    if(!(data -> hsensor_enable)) {
+        data -> old_mode = ap3426_get_mode(data->client);
+        if(mode == AP3426_SYS_PS_ENABLE && data -> old_mode == AP3426_SYS_ALS_ENABLE) {
+            ret = ap3426_ps_init(data->client);
+            ret = ap3426_als_init(data->client);
+            if (ret < 0)
+              return ret;
+            misc_ps_opened = 1;
+            misc_ls_opened = 1;
+        } else if(mode == AP3426_SYS_PS_ENABLE && data -> old_mode == AP3426_SYS_DEV_DOWN){
+            ret = ap3426_ps_init(data->client);
+            if (ret < 0)
+              return ret;
+            misc_ps_opened = 1;
+            misc_ls_opened = 0;
+        } else if(mode == AP3426_SYS_DEV_DOWN){
+            if(data -> old_mode != AP3426_SYS_ALS_PS_ENABLE && data-> hsensor_enable != 1) {
+                ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+                    AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
+                ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+                    AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_DOWN);
+                misc_ps_opened = 0;
+                misc_ls_opened = 0;
+            } else {
+                ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+                    AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_ALS_ENABLE);
+                misc_ps_opened = 0;
+                misc_ls_opened = 1;
+            }
+        }
+        data -> old_mode = ap3426_get_mode(data->client);
+    } else {
+        if(mode == AP3426_SYS_DEV_DOWN && misc_ls_opened == 1) {
+            data -> old_mode = AP3426_SYS_ALS_ENABLE;
+            misc_ps_opened = 0;
+            misc_ls_opened = 1;
+        } else if(mode == AP3426_SYS_PS_ENABLE) {
+            data -> old_mode = AP3426_SYS_PS_ENABLE;
+            misc_ls_opened = 1;
+            misc_ls_opened = 1;
+        } else {
+            data -> old_mode = AP3426_SYS_DEV_DOWN;
+            misc_ps_opened = 0;
+            misc_ls_opened = 0;
+        }
+    }
+    //LDBG("2.data -> old_mode = %d\n", data -> old_mode);
+    mutex_unlock(&ap3426_ps_lock);
+/*#ifndef INTERRUPT_MODE
+    //LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
+    #ifdef HR_TIMER
+        ret = hrtimer_start( &hr_timer, ktime, HRTIMER_MODE_REL );
+    #else
+        ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));     
+    #endif  
+    if(!ret) 
+	LDBG("Timer Error\n");
+#endif*/
+    return count;
+}
+static ssize_t ap3426_hs_enable(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct ap3426_data *data = private_pl_data;
+    unsigned long mode;
+    int ret;
+
+    //LDBG("mode = %s,%s\n", __func__,buf);
+    if (strict_strtoul(buf, 10, &mode) < 0)
+	return -EINVAL;
+
+    mutex_lock(&ap3426_heartbeat_lock);
+
+    if(mode == AP3426_SYS_PS_ENABLE) {
+    	data -> hsensor_enable = 1;
+        ret = ap3426_hs_init(data->client);
+    	if (ret < 0)
+    	    return ret;
+    } else {
+    	data -> hsensor_enable = 0;
+    	ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+    		AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_RESET);
+    	switch(data -> old_mode) {
+    	    case AP3426_SYS_PS_ENABLE:
+                ret = ap3426_ps_init(data->client);
+        		data -> old_mode = AP3426_SYS_PS_ENABLE;
+        		misc_ps_opened = 1;
+        		misc_ls_opened = 0;
+        		break;
+    	    case AP3426_SYS_ALS_ENABLE:
+                ap3426_als_init(data->client);
+        		data -> old_mode = AP3426_SYS_ALS_ENABLE;
+        		misc_ls_opened = 1;
+        		misc_ps_opened = 0;
+        		break;
+    	    case AP3426_SYS_ALS_PS_ENABLE:
+                ap3426_als_init(data->client);
+                ap3426_ps_init(data->client);
+        		data -> old_mode = AP3426_SYS_ALS_PS_ENABLE;
+        		misc_ps_opened = 1;
+        		misc_ls_opened = 1;
+        		break;
+    	    default:
+        		ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_CONF,
+        			AP3426_REG_SYS_CONF_MASK, AP3426_REG_SYS_CONF_SHIFT, AP3426_SYS_DEV_DOWN);
+        		data -> old_mode = AP3426_SYS_DEV_DOWN;
+        		misc_ps_opened = 0;
+        		misc_ls_opened = 0;
+    	}
+    }
+    mutex_unlock(&ap3426_heartbeat_lock);
+/*#ifndef INTERRUPT_MODE
+    //LDBG("Starting timer to fire in 200ms (%ld)\n", jiffies );
+    #ifdef HR_TIMER
+        ret = hrtimer_start( &hr_timer, ktime, HRTIMER_MODE_REL );
+    #else
+        ret = mod_timer(&data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));     
+    #endif
+    if(ret) 
+	   LDBG("Timer Error\n");
+#endif*/
+    return count;
+}
+
+static DEVICE_ATTR(lsensor, S_IRUGO | S_IWUSR | S_IWGRP,
+	ap3426_show_mode, ap3426_ls_enable);
+
+static DEVICE_ATTR(psensor, S_IRUGO | S_IWUSR | S_IWGRP,
+	ap3426_show_mode, ap3426_ps_enable);
+	
+static DEVICE_ATTR(hsensor, S_IRUGO | S_IWUSR | S_IWGRP,
+	ap3426_show_mode, ap3426_hs_enable);
+/* lux */
+static ssize_t ap3426_show_lux(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+
+    /* No LUX data if power down */
+    if (ap3426_get_mode(data->client) == AP3426_SYS_DEV_DOWN)
+	return sprintf((char*) buf, "%s\n", "Please power up first!");
+
+    return sprintf(buf, "%d\n", ap3426_get_adc_value(data->client));
+}
+
+static DEVICE_ATTR(lux, S_IRUGO, ap3426_show_lux, NULL);
+
+
+/* Px data */
+static ssize_t ap3426_show_pxvalue(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+
+    /* No Px data if power down */
+    if (ap3426_get_mode(data->client) == AP3426_SYS_DEV_DOWN)
+	return -EBUSY;
+
+    return sprintf(buf, "%d\n", ap3426_get_px_value(data->client));
+}
+
+static DEVICE_ATTR(pxvalue, S_IRUGO, ap3426_show_pxvalue, NULL);
+
+
+/* proximity object detect */
+static ssize_t ap3426_show_object(struct device *dev,
+	struct device_attribute *attr,
+	char *buf)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    return sprintf(buf, "%d\n", ap3426_get_object(data->client));
+}
+
+static DEVICE_ATTR(object, S_IRUGO, ap3426_show_object, NULL);
+
+
+/* ALS low threshold */
+static ssize_t ap3426_show_althres(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    return sprintf(buf, "%d\n", ap3426_get_althres(data->client));
+}
+
+static ssize_t ap3426_store_althres(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    unsigned long val;
+    int ret;
+
+    if (strict_strtoul(buf, 10, &val) < 0)
+	return -EINVAL;
+
+    ret = ap3426_set_althres(data->client, val);
+    if (ret < 0)
+	return ret;
+
+    return count;
+}
+
+static DEVICE_ATTR(althres, S_IWUSR | S_IRUGO,
+	ap3426_show_althres, ap3426_store_althres);
+
+
+/* ALS high threshold */
+static ssize_t ap3426_show_ahthres(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    return sprintf(buf, "%d\n", ap3426_get_ahthres(data->client));
+}
+
+static ssize_t ap3426_store_ahthres(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    unsigned long val;
+    int ret;
+
+    if (strict_strtoul(buf, 10, &val) < 0)
+	return -EINVAL;
+
+    ret = ap3426_set_ahthres(data->client, val);
+    if (ret < 0)
+	return ret;
+
+    return count;
+}
+
+static DEVICE_ATTR(ahthres, S_IWUSR | S_IRUGO,
+	ap3426_show_ahthres, ap3426_store_ahthres);
+
+/* Px low threshold */
+static ssize_t ap3426_show_plthres(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    return sprintf(buf, "%d\n", ap3426_get_plthres(data->client));
+}
+
+static ssize_t ap3426_store_plthres(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    unsigned long val;
+    int ret;
+
+    if (strict_strtoul(buf, 10, &val) < 0)
+	return -EINVAL;
+
+    ret = ap3426_set_plthres(data->client, val);
+    if (ret < 0)
+	return ret;
+
+    return count;
+}
+
+static DEVICE_ATTR(plthres, S_IWUSR | S_IRUGO,
+	ap3426_show_plthres, ap3426_store_plthres);
+
+/* Px high threshold */
+static ssize_t ap3426_show_phthres(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    return sprintf(buf, "%d\n", ap3426_get_phthres(data->client));
+}
+
+static ssize_t ap3426_store_phthres(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    unsigned long val;
+    int ret;
+
+    if (strict_strtoul(buf, 10, &val) < 0)
+	return -EINVAL;
+
+    ret = ap3426_set_phthres(data->client, val);
+    if (ret < 0)
+	return ret;
+
+    return count;
+}
+
+static DEVICE_ATTR(phthres, S_IWUSR | S_IRUGO,
+	ap3426_show_phthres, ap3426_store_phthres);
+
+
+/* calibration */
+static ssize_t ap3426_show_calibration_state(struct device *dev,
+	struct device_attribute *attr,
+	char *buf)
+{
+    return sprintf(buf, "%d\n", cali);
+}
+
+static ssize_t ap3426_store_calibration_state(struct device *dev,
+	struct device_attribute *attr,
+	const char *buf, size_t count)
+{
+    struct input_dev *input = to_input_dev(dev);
+    struct ap3426_data *data = input_get_drvdata(input);
+    int stdls, lux; 
+    char tmp[10];
+
+    LDBG("DEBUG ap3426_store_calibration_state..\n");
+
+    /* No LUX data if not operational */
+    if (ap3426_get_mode(data->client) == AP3426_SYS_DEV_DOWN)
+    {
+	printk("Please power up first!");
+	return -EINVAL;
+    }
+
+    cali = 100;
+    sscanf(buf, "%d %s", &stdls, tmp);
+
+    if (!strncmp(tmp, "-setcv", 6))
+    {
+	cali = stdls;
+	return -EBUSY;
+    }
+
+    if (stdls < 0)
+    {
+	printk("Std light source: [%d] < 0 !!!\nCheck again, please.\n\
+		Set calibration factor to 100.\n", stdls);
+	return -EBUSY;
+    }
+
+    lux = ap3426_get_adc_value(data->client);
+    cali = stdls * 100 / lux;
+
+    return -EBUSY;
+}
+//<asus-annach20150819>
+bool proximityap3426_check_status(void){
+	
+	struct ap3426_data *ap_data=NULL;
+	int ps_adc_value = 0 ,ps_hight_threshold =0, mode, ret=0, tempsave=5, p_value=0;
+	
+	if(ap3426_probe_fail){
+		pr_err("proximityap3426_check_status  FAR\n");
+		goto error_return_far;
+	}
+	 ap_data = private_pl_data;	
+   	 mode=ap3426_get_mode(ap_data->client) ;
+	 if(mode <0)
+		goto error_return_far;
+	 
+	 //pr_err("proximity_check_status default return mode=%d\n",mode);
+	 if((mode ==AP3426_SYS_DEV_DOWN)||(mode ==AP3426_SYS_ALS_ENABLE)){ //PS NO active
+			tempsave = mode;//save status
+			if(mode ==1) {
+				ret=ap3426_set_mode(ap_data->client,AP3426_SYS_ALS_PS_ENABLE);//open ps +ls
+			}else{
+				ret=ap3426_set_mode(ap_data->client,AP3426_SYS_PS_ENABLE);//open ps
+			}
+			
+			if(ret<0){
+				goto error_return_far;
+			}
+			msleep(50);
+	 }
+
+   	ps_adc_value=ap3426_get_px_value(ap_data->client);
+	
+	ps_hight_threshold=ap3426_get_phthres(ap_data->client);
+	
+	if(ps_adc_value > ps_hight_threshold){
+		pr_err("[PS][ap3426] proximity initial NEAR\n");
+		 p_value = 1 ;
+	}else{
+		pr_err("[PS][ap3426] proximity initial far\n");
+		p_value = 0;
+	}
+	
+	if(tempsave != 5){ //reback mode	
+		ret=ap3426_set_mode(ap_data->client,tempsave);
+		if(ret < 0){
+			goto error_return_far;
+		}
+
+	}
+	
+	return p_value;	
+	error_return_far:
+		return 0;	
+}
+
+EXPORT_SYMBOL(proximityap3426_check_status);
+
+
+
+static DEVICE_ATTR(calibration, S_IWUSR | S_IRUGO,
+	ap3426_show_calibration_state, ap3426_store_calibration_state);
+
+#ifdef LSC_DBG
+/* engineer mode */
+static ssize_t ap3426_em_read(struct device *dev,
+	struct device_attribute *attr,
+	char *buf)
+{
+    struct i2c_client *client = to_i2c_client(dev);
+    struct ap3426_data *data = i2c_get_clientdata(client);
+    int i;
+    u8 tmp;
+
+    LDBG("DEBUG ap3426_em_read..\n");
+
+    for (i = 0; i < reg_num; i++)
+    {
+	tmp = i2c_smbus_read_byte_data(data->client, reg_array[i]);
+
+	LDBG("Reg[0x%x] Val[0x%x]\n", reg_array[i], tmp);
+    }
+
+    return 0;
+}
+
+static ssize_t ap3426_em_write(struct device *dev,
+	struct device_attribute *attr,
+	const char *buf, size_t count)
+{
+    struct i2c_client *client = to_i2c_client(dev);
+    struct ap3426_data *data = i2c_get_clientdata(client);
+    u32 addr,val,idx=0;
+    int ret = 0;
+
+    LDBG("DEBUG ap3426_em_write..\n");
+    sscanf(buf, "%x%x", &addr, &val);
+
+    printk("Write [%x] to Reg[%x]...\n",val,addr);
+
+    ret = i2c_smbus_write_byte_data(data->client, addr, val);
+    ADD_TO_IDX(addr,idx)
+	if (!ret)
+	    data->reg_cache[idx] = val;
+
+    return count;
+}
+static DEVICE_ATTR(em, S_IWUSR |S_IRUGO,
+	ap3426_em_read, ap3426_em_write);
+#endif
+
+static struct attribute *ap3426_attributes[] = {
+    &dev_attr_range.attr,
+    &dev_attr_mode.attr,
+	&dev_attr_lsensor.attr,
+	&dev_attr_psensor.attr,
+	&dev_attr_hsensor.attr,
+    &dev_attr_lux.attr,
+    &dev_attr_object.attr,
+    &dev_attr_pxvalue.attr,
+    &dev_attr_althres.attr,
+    &dev_attr_ahthres.attr,
+    &dev_attr_plthres.attr,
+    &dev_attr_phthres.attr,
+    &dev_attr_calibration.attr,
+#ifdef LSC_DBG
+    &dev_attr_em.attr,
+#endif
+    NULL
 };
 
 static const struct attribute_group ap3426_attr_group = {
-	.attrs = ap3426_attr,
+    .attrs = ap3426_attributes,
 };
 
-static int ap3426_probe(struct i2c_client *client,
-		const struct i2c_device_id *id)
+static int ap3426_init_client(struct i2c_client *client)
 {
-	struct ap3426_data *di;
-	int res = 0;
+    struct ap3426_data *data = i2c_get_clientdata(client);
+    int i;
 
-	dev_dbg(&client->dev, "probing ap3426...\n");
+    LDBG("DEBUG ap3426_init_client..\n");
+	
 
-	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
-		dev_err(&client->dev, "ap3426 i2c check failed.\n");
-		return -ENODEV;
-	}
+    /* read all the registers once to fill the cache.
+     * if one of the reads fails, we consider the init failed */
+    for (i = 0; i < reg_num; i++) {
+	int v = i2c_smbus_read_byte_data(client, reg_array[i]);
+	if (v < 0)
+	    return -ENODEV;
 
-	di = devm_kzalloc(&client->dev, sizeof(struct ap3426_data),
-			GFP_KERNEL);
-	if (!di) {
-		dev_err(&client->dev, "memory allocation failed,\n");
-		return -ENOMEM;
-	}
+	data->reg_cache[i] = v;
+    }
 
-	di->i2c = client;
+    /* set defaults */
+    ap3426_set_range(client, AP3426_ALS_RANGE_1);
+    ap3426_set_mode(client, AP3426_SYS_DEV_DOWN);
 
-	if (client->dev.of_node) {
-		res = ap3426_parse_dt(&client->dev, di);
-		if (res) {
-			dev_err(&client->dev,
-				"unable to parse device tree.(%d)\n", res);
-			goto out;
-		}
-	} else {
-		dev_err(&client->dev, "device tree not found.\n");
-		res = -ENODEV;
-		goto out;
-	}
+	ap3426_set_plthres(client,276);//5m
+	ap3426_set_phthres(client,627);//3
+	//anna
+	//__ap3426_write_reg(client, AP3426_REG_PS_LEDD,
+	//    0x03, 0, 0x00);//led driver
+	
+	__ap3426_write_reg(client, AP3426_REG_PS_INTEGR,
+	    0, 0, 0x0b);
 
-	dev_set_drvdata(&client->dev, di);
-	mutex_init(&di->ops_lock);
+	__ap3426_write_reg(client, AP3426_REG_SYS_INTCTRL,
+	    0x88, 0, 0x00);
 
-	di->regmap = devm_regmap_init_i2c(client, &ap3426_regmap_config);
-	if (IS_ERR(di->regmap)) {
-		dev_err(&client->dev, "init regmap failed.(%ld)\n",
-				PTR_ERR(di->regmap));
-		res = PTR_ERR(di->regmap);
-		goto out;
-	}
 
-	res = sensor_power_init(&client->dev, power_config,
-			ARRAY_SIZE(power_config));
-	if (res) {
-		dev_err(&client->dev, "init power failed.\n");
-		goto out;
-	}
+    return 0;
+}
 
-	res = sensor_power_config(&client->dev, power_config,
-			ARRAY_SIZE(power_config), true);
-	if (res) {
-		dev_err(&client->dev, "power up sensor failed.\n");
-		goto err_power_config;
-	}
 
-	res = sensor_pinctrl_init(&client->dev, &pin_config);
-	if (res) {
-		dev_err(&client->dev, "init pinctrl failed.\n");
-		goto err_pinctrl_init;
-	}
 
-	/* wait the device to boot up */
-	msleep(AP3426_BOOT_TIME_MS);
+static int ap3426_power_set(struct ap3426_data *info, bool on)
+{
+	int rc;
 
-	res = ap3426_check_device(di);
-	if (res) {
-		dev_err(&client->dev, "check device failed.\n");
-		goto err_check_device;
-	}
-
-	res = ap3426_init_device(di);
-	if (res) {
-		dev_err(&client->dev, "check device failed.\n");
-		goto err_init_device;
-	}
-
-	/* configure interrupt */
-	if (gpio_is_valid(di->irq_gpio)) {
-		res = gpio_request(di->irq_gpio, "ap3426_interrupt");
-		if (res) {
-			dev_err(&client->dev,
-				"unable to request interrupt gpio %d\n",
-				di->irq_gpio);
-			goto err_request_gpio;
+	if (on) {
+		info->vdd = regulator_get(&info->client->dev, "vdd");
+		if (IS_ERR(info->vdd)) {
+			rc = PTR_ERR(info->vdd);
+			dev_err(&info->client->dev,
+				"Regulator get failed vdd rc=%d\n", rc);
+			goto err_vdd_get;
 		}
 
-		res = gpio_direction_input(di->irq_gpio);
-		if (res) {
-			dev_err(&client->dev,
-				"unable to set direction for gpio %d\n",
-				di->irq_gpio);
-			goto err_set_direction;
+		if (regulator_count_voltages(info->vdd) > 0) {
+			rc = regulator_set_voltage(info->vdd,
+					AP3426_VDD_MIN_UV, AP3426_VDD_MAX_UV);
+			if (rc) {
+				dev_err(&info->client->dev,
+					"Regulator set failed vdd rc=%d\n", rc);
+				goto err_vdd_set_vtg;
+			}
 		}
 
-		di->irq = gpio_to_irq(di->irq_gpio);
-
-		res = devm_request_irq(&client->dev, di->irq,
-				ap3426_irq_handler,
-				di->irq_flags | IRQF_ONESHOT,
-				"ap3426", di);
-
-		if (res) {
-			dev_err(&client->dev,
-					"request irq %d failed(%d),\n",
-					di->irq, res);
-			goto err_request_irq;
+		info->vio = regulator_get(&info->client->dev, "vio");
+		if (IS_ERR(info->vio)) {
+			rc = PTR_ERR(info->vio);
+			dev_err(&info->client->dev,
+				"Regulator get failed vio rc=%d\n", rc);
+			goto err_vio_get;
 		}
 
-		/* device wakeup initialization */
-		device_init_wakeup(&client->dev, 1);
+		if (regulator_count_voltages(info->vio) > 0) {
+			rc = regulator_set_voltage(info->vio,
+				AP3426_VI2C_MIN_UV, AP3426_VI2C_MAX_UV);
+			if (rc) {
+				dev_err(&info->client->dev,
+				"Regulator set failed vio rc=%d\n", rc);
+				goto err_vio_set_vtg;
+			}
+		}
 
-		di->workqueue = alloc_workqueue("ap3426_workqueue",
-				WQ_NON_REENTRANT | WQ_FREEZABLE, 0);
-		INIT_WORK(&di->report_work, ap3426_report_work);
-		INIT_WORK(&di->als_enable_work, ap3426_als_enable_work);
-		INIT_WORK(&di->als_disable_work, ap3426_als_disable_work);
-		INIT_WORK(&di->ps_enable_work, ap3426_ps_enable_work);
-		INIT_WORK(&di->ps_disable_work, ap3426_ps_disable_work);
+		rc = regulator_enable(info->vdd);
+		if (rc) {
+			dev_err(&info->client->dev,
+				"Regulator vdd enable failed rc=%d\n", rc);
+			goto err_vdd_ena;
+		}
+
+		rc = regulator_enable(info->vio);
+		if (rc) {
+			dev_err(&info->client->dev,
+				"Regulator vio enable failed rc=%d\n", rc);
+			goto err_vio_ena;
+		}
 
 	} else {
-		res = -ENODEV;
-		goto err_init_device;
+		rc = regulator_disable(info->vdd);
+		if (rc) {
+			dev_err(&info->client->dev,
+				"Regulator vdd disable failed rc=%d\n", rc);
+			return rc;
+		}
+		if (regulator_count_voltages(info->vdd) > 0)
+			regulator_set_voltage(info->vdd, 0, AP3426_VDD_MAX_UV);
+
+		regulator_put(info->vdd);
+
+		rc = regulator_disable(info->vio);
+		if (rc) {
+			dev_err(&info->client->dev,
+				"Regulator vio disable failed rc=%d\n", rc);
+			return rc;
+		}
+		if (regulator_count_voltages(info->vio) > 0)
+			regulator_set_voltage(info->vio, 0,
+					AP3426_VI2C_MAX_UV);
+
+		regulator_put(info->vio);
 	}
-
-	res = sysfs_create_group(&client->dev.kobj, &ap3426_attr_group);
-	if (res) {
-		dev_err(&client->dev, "sysfs create group failed\n");
-		goto err_create_group;
-	}
-
-	res = ap3426_init_input(di);
-	if (res) {
-		dev_err(&client->dev, "init input failed.\n");
-		goto err_init_input;
-	}
-
-	/* input device should hold a 200ms wake lock */
-	device_init_wakeup(&di->input_proximity->dev, 1);
-
-	di->als_cdev = als_cdev;
-	di->als_cdev.sensors_enable = ap3426_cdev_enable_als;
-	di->als_cdev.sensors_poll_delay = ap3426_cdev_set_als_delay;
-	di->als_cdev.sensors_flush = ap3426_cdev_als_flush;
-	res = sensors_classdev_register(&di->input_light->dev, &di->als_cdev);
-	if (res) {
-		dev_err(&client->dev, "sensors class register failed.\n");
-		goto err_register_als_cdev;
-	}
-
-	di->ps_cdev = ps_cdev;
-	di->ps_cdev.sensors_enable = ap3426_cdev_enable_ps;
-	di->ps_cdev.sensors_poll_delay = ap3426_cdev_set_ps_delay;
-	di->ps_cdev.sensors_flush = ap3426_cdev_ps_flush;
-	di->ps_cdev.sensors_calibrate = ap3426_cdev_ps_calibrate;
-	di->ps_cdev.sensors_write_cal_params = ap3426_cdev_ps_write_cal;
-	di->ps_cdev.params = di->calibrate_buf;
-	res = sensors_classdev_register(&di->input_proximity->dev,
-			&di->ps_cdev);
-	if (res) {
-		dev_err(&client->dev, "sensors class register failed.\n");
-		goto err_register_ps_cdev;
-	}
-
-	sensor_power_config(&client->dev, power_config,
-			ARRAY_SIZE(power_config), false);
-	di->power_enabled = false;
-
-	dev_info(&client->dev, "ap3426 successfully probed!\n");
 
 	return 0;
 
-err_register_ps_cdev:
-	sensors_classdev_unregister(&di->als_cdev);
-err_register_als_cdev:
-	device_init_wakeup(&di->input_proximity->dev, 0);
-err_init_input:
-	sysfs_remove_group(&client->dev.kobj, &ap3426_attr_group);
-err_create_group:
-err_request_irq:
-err_set_direction:
-	gpio_free(di->irq_gpio);
-err_request_gpio:
-err_init_device:
-	device_init_wakeup(&client->dev, 0);
-err_check_device:
-err_pinctrl_init:
-	sensor_power_config(&client->dev, power_config,
-			ARRAY_SIZE(power_config), false);
-err_power_config:
-	sensor_power_deinit(&client->dev, power_config,
-			ARRAY_SIZE(power_config));
-out:
-	return res;
+err_vio_ena:
+	regulator_disable(info->vdd);
+err_vdd_ena:
+	if (regulator_count_voltages(info->vio) > 0)
+		regulator_set_voltage(info->vio, 0, AP3426_VI2C_MAX_UV);
+err_vio_set_vtg:
+	regulator_put(info->vio);
+err_vio_get:
+	if (regulator_count_voltages(info->vdd) > 0)
+		regulator_set_voltage(info->vdd, 0, AP3426_VDD_MAX_UV);
+err_vdd_set_vtg:
+	regulator_put(info->vdd);
+err_vdd_get:
+	return rc;
 }
 
-static int ap3426_remove(struct i2c_client *client)
+
+
+#ifndef INTERRUPT_MODE
+void pl_timer_callback(unsigned long pl_data)
 {
-	struct ap3426_data *di = dev_get_drvdata(&client->dev);
+    struct ap3426_data *data;
+    int ret =0;
 
-	sensors_classdev_unregister(&di->ps_cdev);
-	sensors_classdev_unregister(&di->als_cdev);
+    data = private_pl_data;
+    queue_work(data->plsensor_wq, &data->plsensor_work);
 
-	destroy_workqueue(di->workqueue);
-	device_init_wakeup(&di->i2c->dev, 0);
-	device_init_wakeup(&di->input_proximity->dev, 0);
+    ret = mod_timer(&private_pl_data->pl_timer, jiffies + usecs_to_jiffies(PL_TIMER_DELAY));
 
-	sensor_power_config(&client->dev, power_config,
-			ARRAY_SIZE(power_config), false);
-	sensor_power_deinit(&client->dev, power_config,
-			ARRAY_SIZE(power_config));
+    if(ret) 
+	LDBG("Timer Error\n");
 
-	return 0;
 }
+    #ifdef HR_TIMER 
+        static enum hrtimer_restart ap3426_hrtimer_callback( struct hrtimer *timer )
+        {
+            struct ap3426_data *data;
+            int ret =0;
+            ktime_t currtime , interval;
+            currtime  = ktime_get();
 
-static int ap3426_suspend(struct device *dev)
+            data = private_pl_data;
+            queue_work(data->plsensor_wq, &data->plsensor_work);
+
+            //LDBG("%s\n", __func__);
+            interval = ktime_set(0, MS_TO_NS(PL_TIMER_DELAY)); 
+            hrtimer_forward(timer, currtime , interval);
+
+            if(ret) 
+            LDBG("Timer Error\n");
+            return HRTIMER_RESTART;
+        }
+    #endif
+#endif
+static void plsensor_work_handler(struct work_struct *w)
 {
-	int res = 0;
-	struct ap3426_data *di = dev_get_drvdata(dev);
-	u8 ps_data[4];
-	unsigned int config;
-	int idx = di->ps_wakeup_threshold;
 
-	dev_dbg(dev, "suspending ap3426...");
+    struct ap3426_data *data =private_pl_data;
+	//container_of(w, struct ap3426_data, plsensor_work);
+    u8 int_stat;
+    int pxvalue;
+    int distance;
+    //int obj;
+    int ret;
+   
+    unsigned char INT_Reg;
+	
+	//pr_err( "[PS]anna irq\n");
+    int_stat = ap3426_get_intstat(data->client);
+    if (int_stat & AP3426_REG_SYS_INT_AL_MASK) 
+        INT_Reg &= 0xFE;
+    if (int_stat & AP3426_REG_SYS_INT_PS_MASK)
+        INT_Reg &= 0xFD;
+    if (INT_Reg != int_stat){
+        ret = __ap3426_write_reg(data->client, AP3426_REG_SYS_INTSTATUS,
+            0x03, 0x00, INT_Reg);
+    }
+    // ALS int
+    if (misc_ls_opened == 1){
+        #ifdef INTERRUPT_MODE
+            if (int_stat & AP3426_REG_SYS_INT_AMASK)
+            {
+            	
+            	/*value = ap3426_get_adc_value(data->client);
+            	input_report_abs(data->lsensor_input_dev, ABS_MISC, value);				
+            	input_sync(data->lsensor_input_dev);;
+		ap3426_set_ahthres(data->client,Highth);  */
+            	ap3426_change_ls_threshold(data->client);
+            }
+        #else    
+	   int value;
+            value = ap3426_get_adc_value(data->client);
+          //  LDBG("ALS ADC Data: %d\n", value);
+            input_report_abs(data->lsensor_input_dev, ABS_MISC, value);
+            input_sync(data->lsensor_input_dev);
+        #endif
+    }
 
-	mutex_lock(&di->ops_lock);
+    if(data->hsensor_enable) {
+        if (int_stat & AP3426_REG_SYS_INT_PMASK)
+        {    
+         // pr_err( "[PS]anna irq 33 \n");
+            pxvalue = ap3426_get_px_value(data->client);
+            input_report_rel(data->hsensor_input_dev, ABS_WHEEL, pxvalue);
+            input_sync(data->hsensor_input_dev);
+           // LDBG("hsensor pxvalue = %d\n", pxvalue);
+        }
+    }else{
+        // PX int
+        if (int_stat & AP3426_REG_SYS_INT_PMASK)
+        {    
+          //pr_err( "[PS]anna irq 44 \n");
+        	//obj = ap3426_get_object(data->client);
+		distance = ap3426_get_object(data->client);
+		//	if (data->once_ps_opened == 0) {
+				if(distance == 1){
+					distance = 0;
+				}else{	
+					distance = 1;}
+		//	}else{
+		 //		data->once_ps_opened--;
+		//	distance = 1;
+	   	//}
+		//pr_err( "[PS]anna irq distance=%d \n",distance);
+        	input_report_abs(data->psensor_input_dev, ABS_DISTANCE, distance);
+        	input_sync(data->psensor_input_dev);
+		proximity_state = distance;
+          	pxvalue = ap3426_get_px_value(data->client); 
 
-	/* proximity is enabled */
-	if (di->ps_enabled) {
-		/* disable als sensor to avoid wake up by als interrupt */
-		if (di->als_enabled) {
-			res = regmap_read(di->regmap, AP3426_REG_CONFIG,
-					&config);
-			if (res) {
-				dev_err(&di->i2c->dev, "read %d failed.(%d)\n",
-						AP3426_REG_CONFIG, res);
-				goto exit;
-			}
+	 	input_report_abs(data->hsensor_input_dev, ABS_WHEEL, pxvalue);
+    		input_sync(data->hsensor_input_dev);
+           	// LDBG("px-value = %d -> %s\n", pxvalue, obj ? "obj near":"obj far");
+        }
+    }
 
+#ifdef INTERRUPT_MODE
+    enable_irq(data->client->irq);
+#endif
+}
+/*
+ * I2C layer
+ */
 
-			res = regmap_write(di->regmap, AP3426_REG_CONFIG,
-					config & (~0x1));
-			if (res) {
-				dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-						AP3426_REG_CONFIG, res);
-				goto exit;
-			}
-
-			ap3426_sync_delay(di, 0, 1, 0, di->ps_delay);
-		}
-
-		/* Don't power off sensor because proximity is a
-		 * wake up sensor.
-		 */
-		if (device_may_wakeup(&di->i2c->dev)) {
-			dev_dbg(&di->i2c->dev, "enable irq wake\n");
-			enable_irq_wake(di->irq);
-		}
-
-		/* Setup threshold to avoid frequent wakeup */
-		if (device_may_wakeup(&di->i2c->dev) &&
-				(idx != AP3426_WAKEUP_ANY_CHANGE)) {
-			dev_dbg(&di->i2c->dev, "last ps: %d\n", di->last_ps);
-			if (di->last_ps > idx) {
-				ps_data[0] = 0x0;
-				ps_data[1] = 0x0;
-				ps_data[2] =
-					PS_LOW_BYTE(ps_distance_table[idx]);
-				ps_data[3] =
-					PS_HIGH_BYTE(ps_distance_table[idx]);
-			} else {
-				ps_data[0] =
-					PS_LOW_BYTE(ps_distance_table[idx]);
-				ps_data[1] =
-					PS_HIGH_BYTE(ps_distance_table[idx]);
-				ps_data[2] = PS_LOW_BYTE(PS_DATA_MASK);
-				ps_data[3] = PS_HIGH_BYTE(PS_DATA_MASK);
-			}
-
-			res = regmap_bulk_write(di->regmap,
-					AP3426_REG_PS_LOW_THRES_0, ps_data, 4);
-			if (res) {
-				dev_err(&di->i2c->dev, "set up threshold failed\n");
-				goto exit;
-			}
-		}
-	} else {
-		/* power off */
-		disable_irq(di->irq);
-		if (di->power_enabled) {
-			res = sensor_power_config(dev, power_config,
-					ARRAY_SIZE(power_config), false);
-			if (res) {
-				dev_err(dev, "failed to suspend ap3426\n");
-				enable_irq(di->irq);
-				goto exit;
-			}
-		}
-		pinctrl_select_state(pin_config.pinctrl, pin_config.state[1]);
+static irqreturn_t ap3426_irq(int irq, void *data_)
+{
+    struct ap3426_data *data = data_;
+    if (proximity_state == 0) {
+		wake_lock_timeout(&(data->ps_wake_lock), 1 * HZ);
+		//pr_err("ap3426:  ap3426_irq \n");
 	}
-exit:
-	mutex_unlock(&di->ops_lock);
-	return res;
+    disable_irq_nosync(data->client->irq);
+    queue_work(data->plsensor_wq, &ap3426_irq_work);
+
+    return IRQ_HANDLED;
 }
 
-static int ap3426_resume(struct device *dev)
+static int ap3426_setup(struct i2c_client *client,struct ap3426_data *data)
 {
-	int res = 0;
-	struct ap3426_data *di = dev_get_drvdata(dev);
-	unsigned int config;
+	struct device_node *np = client->dev.of_node;
+	int ret = 0;
+	int gpio;
 
-	dev_dbg(dev, "resuming ap3426...");
-	if (di->ps_enabled) {
-		if (device_may_wakeup(&di->i2c->dev)) {
-			dev_dbg(&di->i2c->dev, "disable irq wake\n");
-			disable_irq_wake(di->irq);
-		}
-
-		if (di->als_enabled) {
-			res = regmap_read(di->regmap, AP3426_REG_CONFIG,
-					&config);
-			if (res) {
-				dev_err(&di->i2c->dev, "read %d failed.(%d)\n",
-						AP3426_REG_CONFIG, res);
-				goto exit;
-			}
-
-			res = regmap_write(di->regmap, AP3426_REG_CONFIG,
-					config | 0x1);
-			if (res) {
-				dev_err(&di->i2c->dev, "write %d failed.(%d)\n",
-						AP3426_REG_CONFIG, res);
-				goto exit;
-			}
-
-			ap3426_sync_delay(di, 1, 1, di->als_delay,
-					di->ps_delay);
-		}
-
-	} else {
-		pinctrl_select_state(pin_config.pinctrl, pin_config.state[0]);
-		/* Power up sensor */
-		if (di->power_enabled) {
-			res = sensor_power_config(dev, power_config,
-					ARRAY_SIZE(power_config), true);
-			if (res) {
-				dev_err(dev, "failed to power up ap3426\n");
-				goto exit;
-			}
-			msleep(AP3426_BOOT_TIME_MS);
-
-			res = ap3426_init_device(di);
-			if (res) {
-				dev_err(dev, "failed to init ap3426\n");
-				goto exit_power_off;
-			}
-
-			ap3426_sync_delay(di, di->als_enabled, 0, di->als_delay,
-					di->ps_delay);
-		}
-
-		if (di->als_enabled) {
-			res = ap3426_enable_als(di, di->als_enabled);
-			if (res) {
-				dev_err(dev, "failed to enable ap3426\n");
-				goto exit_power_off;
-			}
-		}
-
-		enable_irq(di->irq);
+	
+	//gpio = get_gpio_by_name("ALS_INT#");
+	
+	gpio = of_get_named_gpio_flags(np, "ap,interrupt-gpio",0, NULL);
+	pr_err( "[PS]read interrupt pin number is =%d\n",gpio);
+	
+	if (gpio< 0) {
+		pr_err( "[PS]Unable to read interrupt pin number\n");
+		return ret;
+	} else{
+		data->gpioNum = gpio;
 	}
 
-	return res;
-
-exit_power_off:
-	if ((!di->als_enabled) && (!di->ps_enabled) &&
-			di->power_enabled) {
-		if (sensor_power_config(&di->i2c->dev, power_config,
-					ARRAY_SIZE(power_config), false)) {
-			dev_err(&di->i2c->dev, "power up sensor failed.\n");
-			goto exit;
-		}
-		di->power_enabled = false;
+	
+	ret = gpio_request(gpio, "gpio_ap3426_intr");
+	//pr_err("[PS][ap3426 ]%s: gpio %d request  (%d)\n", __func__, gpio, ret);
+	if (ret < 0) {
+		pr_err("[PS][ap3426 error]%s: gpio %d request failed (%d)\n", __func__, gpio, ret);
+		return ret;
 	}
 
-exit:
-	return res;
+	ret = gpio_direction_input(gpio);
+	if (ret < 0) {
+   		   pr_err( "[PS][ap3426 error]%s: fail to set gpio %d as input (%d)\n", __func__, gpio, ret);
+		 goto fail_free_intr_pin;
+	}
+		
+	
+    	client->irq =  gpio_to_irq(gpio); 
+	
+	ret = enable_irq_wake(client->irq);
+
+	if (ret < 0) {
+           pr_err( "[PS][ap3426 error]%s: req_irq(%d) fail for gpio %d (%d)\n", __func__, client->irq, gpio, ret);
+           goto fail_free_intr_pin;
+	}
+
+	
+	return ret;
+
+fail_free_intr_pin:
+	gpio_free(gpio);
+
+	return ret;
 }
+
+static int  ap3426_probe(struct i2c_client *client,
+	const struct i2c_device_id *id)
+{
+    struct i2c_adapter *adapter = to_i2c_adapter(client->dev.parent);
+    struct ap3426_data *data;
+    int err = 0;
+   int status =0;
+ 	
+	pr_err("[PS][ap3426] %s\n", __func__);
+    if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE)){
+		pr_err("[PS_ERR][ap3426 error]%s: ap3426 not present!\n", __func__);
+	err = -EIO;
+	goto exit_free_gpio;
+    }
+	//pr_err("[PS_ERR][ap3426 error]%s: ap3426 present test!\n", __func__);
+    status = i2c_smbus_read_byte_data(client, AP3426_REG_SYS_CONF);
+	if (status < 0) {
+	pr_err("[PS_ERR][ap3426 error]%s: ap3426 is not present !\n", __func__);
+	err = -ENODEV;
+	goto exit_free_gpio;
+    }
+//pr_err("[PS_ERR][ap3426 error]%s: ap3426 present test!2222\n", __func__);
+    reg_array = ap3426_reg;
+    range = ap3426_range;
+    reg_num = AP3426_NUM_CACHABLE_REGS;
+
+    data = kzalloc(sizeof(struct ap3426_data), GFP_KERNEL);
+    if (!data){
+	err = -ENOMEM;
+	goto exit_free_gpio;
+    }
+
+    // Instead of set in intel-mid.c, irq value is set here.   
+
+	err =ap3426_setup(client,data);
+
+	if (err) {
+		pr_err("[PS_ERR][ap3426 error]%s: ap3426_setup error!\n", __func__);
+		goto exit_kfree;
+	}
+
+    data->client = client;
+    i2c_set_clientdata(client, data);
+    data->irq = client->irq;
+    data->status_calling = 0;
+     //pr_err("anna ap3426_probe data->irq = %x\n", data->irq);
+	 
+   
+	//LDBG("ZXTEST ap3426_probe client->irq = %x\n", client->irq);
+	//printk("%s:anna ASUS_PSENSOR test : ap3426_em_write client->irq = %x\n", __func__ , client->irq);
+    /* initialize the AP3426 chip */
+        err = ap3426_init_client(client);
+	err =  ap3426_als_init(client);
+	err =  ap3426_ps_init(client);
+	//pr_err("[PS_ERR][ap3426 error]%s: ap3426 present test!4444\n", __func__);
+
+
+    if (err)
+	goto exit_kfree;
+
+    err = ap3426_register_lsensor_device(client,data);
+    if (err){
+	dev_err(&client->dev, "failed to register_lsensor_device\n");
+	goto exit_kfree;
+    }
+
+    err = ap3426_register_psensor_device(client, data);
+    if (err) {
+	dev_err(&client->dev, "failed to register_psensor_deviSe\n");
+	goto exit_free_ls_device;
+    }
+
+    err = ap3426_register_heartbeat_sensor_device(client, data);
+    if (err) {
+	dev_err(&client->dev, "failed to register_heartbeatsensor_device\n");
+	goto exit_free_heartbeats_device;
+    }
+
+     	wake_lock_init(&(data->ps_wake_lock), WAKE_LOCK_SUSPEND, "proximity");
+
+	err = ap3426_power_set(data, true);
+	if (err < 0) {	
+		dev_err(&client->dev, "%s:ap3426 power on error!\n", __func__);
+		goto err_ap3426_power_on;
+	}
+	
+#ifdef INTERRUPT_MODE
+
+    data->plsensor_wq = create_singlethread_workqueue("plsensor_wq");
+    if (!data->plsensor_wq) {
+	LDBG("%s: create workqueue failed\n", __func__);
+	err = -ENOMEM;
+	goto err_create_wq_failed;
+    }
+
+  err = request_irq (client->irq,
+                       ap3426_irq,
+                       IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
+             			"ap3426",
+            			data);
+  if (err) {
+    	dev_err(&client->dev, "ret: %d, could not get IRQ %d\n",err,client->irq);
+    	goto exit_free_ps_device;
+    }
+
+#else    
+    #ifdef HR_TIMER 
+        LDBG("HR Timer module installing\n");
+        ktime = ktime_set( 0, MS_TO_NS(PL_TIMER_DELAY) );
+        hrtimer_init( &hr_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL );
+        hr_timer.function = &ap3426_hrtimer_callback;
+        LDBG( "Starting timer to fire in %dms (%ld)\n", PL_TIMER_DELAY, jiffies );
+        hrtimer_start( &hr_timer, ktime, HRTIMER_MODE_REL );   
+    #else
+        LDBG("Timer module installing\n");
+        setup_timer(&data->pl_timer, pl_timer_callback, 0);
+    #endif
+#endif
+
+
+#if 1
+    /* register sysfs hooks */
+    err = sysfs_create_group(&data->client->dev.kobj, &ap3426_attr_group);
+    if (err)
+	goto exit_free_ps_device;
+#endif
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+    ap3426_early_suspend.suspend = ap3426_suspend_early;
+    ap3426_early_suspend.resume  = ap3426_resume_early;
+    ap3426_early_suspend.level   = 0x02;
+    register_early_suspend(&ap3426_early_suspend);
+#endif
+
+
+  //  INIT_WORK(&data->plsensor_work, plsensor_work_handler);
+   
+    	private_pl_data = data;
+//<anna  >for ps sensor user image K psensor
+	data->AP3426_class = class_create(THIS_MODULE, "optical_sensors");
+	
+	if (IS_ERR(data->AP3426_class)) {
+		err = PTR_ERR(data->AP3426_class);
+		data->AP3426_class = NULL;
+		goto err_create_class;
+	}
+	pr_err("anna AP3426_class  ok\n");
+	data->ps_dev = device_create(data->AP3426_class,
+                                 NULL,
+                                  0, 
+                                  "%s", 
+                                  "proximity");
+
+	if (unlikely(IS_ERR(data->ps_dev))) {
+ 		  err = PTR_ERR(data->ps_dev);
+          data->ps_dev = NULL;
+          goto err_create_ps_device_file;
+	}
+	pr_err("anna ps_dev  ok\n");
+	
+/* register the attributes */
+	err = device_create_file(data->ps_dev, &dev_attr_ps_adc);
+	if (err)
+		goto exit_free_ps_device;
+	//<anna  >
+
+//<ASUS-<asus-annacheng20150129>>>>>>>>>>>>>>+
+	if(create_ap3426_asusproc_lightsensor_status_entry( ))
+		printk("[%s] : ERROR to create lightsensor proc entry\n",__func__);
+
+	if(create_ap3426_asusproc_Proximitysensor_status_entry( ))
+		printk("[%s] : ERROR to create Proximitysensor proc entry\n",__func__);
+//<ASUS-<asus-annacheng20150129><<<<<<<<<<<<+
+
+	//enable_irq(data->client->irq);//need change
+    	dev_info(&client->dev, "Driver version %s enabled\n", DRIVER_VERSION);
+	//pr_err("anna ap3426_probe end\n");
+	ap3426_probe_fail=0; // <asus-olaf20151005+>
+    return 0;
+	
+err_ap3426_power_on:
+     wake_lock_destroy(&(data->ps_wake_lock));
+err_create_wq_failed:
+#ifndef INTERRUPT_MODE
+    #ifdef HR_TIMER
+    if(&data->pl_timer != NULL)
+        hrtimer_cancel( &hr_timer );
+    #else
+        if(&data->pl_timer != NULL)
+	del_timer(&data->pl_timer);
+    #endif
+#endif
+    if (data->plsensor_wq)
+	destroy_workqueue(data->plsensor_wq);
+err_create_class:
+err_create_ps_device_file:	
+exit_free_ps_device:
+    ap3426_unregister_psensor_device(client,data);
+
+exit_free_heartbeats_device:
+    ap3426_unregister_heartbeat_device(client,data);
+exit_free_ls_device:
+    ap3426_unregister_lsensor_device(client,data);
+
+exit_kfree:
+    kfree(data);
+
+exit_free_gpio:
+   ap3426_probe_fail=1;
+    return err;
+}
+
+static int  ap3426_remove(struct i2c_client *client)
+{
+    struct ap3426_data *data = i2c_get_clientdata(client);
+    free_irq(data->irq, data);
+
+    sysfs_remove_group(&data->client->dev.kobj, &ap3426_attr_group);
+    ap3426_unregister_psensor_device(client,data);
+    ap3426_unregister_lsensor_device(client,data);
+    ap3426_unregister_heartbeat_device(client,data);
+#ifdef CONFIG_HAS_EARLYSUSPEND
+    unregister_early_suspend(&ap3426_early_suspend);
+#endif
+
+    ap3426_set_mode(client, 0);
+    kfree(i2c_get_clientdata(client));
+
+    if (data->plsensor_wq)
+	destroy_workqueue(data->plsensor_wq);
+#ifndef INTERRUPT_MODE
+    #ifdef HR_TIMER
+        if(&data->pl_timer != NULL)
+        hrtimer_cancel( &hr_timer );
+    #else
+        if(&data->pl_timer != NULL)
+	del_timer(&data->pl_timer);
+    #endif
+#endif
+    return 0;
+}
+
+static UNIVERSAL_DEV_PM_OPS(ap3426_pm, ap3426_suspend_normal, ap3426_resume_normal, NULL);
 
 static const struct i2c_device_id ap3426_id[] = {
-	{ AP3426_I2C_NAME, 0 },
-	{ }
+    { AP3426_DRV_NAME, 0 },
+    {}
 };
+MODULE_DEVICE_TABLE(i2c, ap3426_id);
 
 static struct of_device_id ap3426_match_table[] = {
-	{ .compatible = "di,ap3426", },
+	{ .compatible = "ap,ap3426",},
 	{ },
 };
 
-static const struct dev_pm_ops ap3426_pm_ops = {
-	.suspend = ap3426_suspend,
-	.resume = ap3426_resume,
-};
-
 static struct i2c_driver ap3426_driver = {
-	.probe		= ap3426_probe,
-	.remove	= ap3426_remove,
-	.id_table	= ap3426_id,
-	.driver	= {
+  
+	.id_table = ap3426_id,
+	.probe	= ap3426_probe,
+	.remove =ap3426_remove,
+    	.driver = {
+		.name	= AP3426_DRV_NAME,
 		.owner	= THIS_MODULE,
-		.name	= AP3426_I2C_NAME,
+		.pm = &ap3426_pm, 
 		.of_match_table = ap3426_match_table,
-		.pm = &ap3426_pm_ops,
+	},
+   
+
+};
+   
+
+
+
+
+static struct i2c_board_info AP3426_board_info[] = {
+	{
+    		I2C_BOARD_INFO(AP3426_DRV_NAME, 0x1e),
 	},
 };
 
-module_i2c_driver(ap3426_driver);
 
-MODULE_DESCRIPTION("AP3426 ALPS Driver");
-MODULE_LICENSE("GPLv2");
+
+static int __init ap3426_init(void)
+{
+    int ret;
+
+    LDBG("ap3426_init\n");
+
+	i2c_register_board_info(0x05, AP3426_board_info, ARRAY_SIZE(AP3426_board_info));
+
+    ret = i2c_add_driver(&ap3426_driver);
+    return ret;	
+
+}
+
+static void __exit ap3426_exit(void)
+{
+    i2c_del_driver(&ap3426_driver);
+//<asus-annacheng20150129>>>>>>>>>>>>>>>>>>+	
+	if(ap3426_proximitysensor_entry)
+		remove_proc_entry("Proximitysensor_status", NULL);
+	if(ap3426_lightsensor_entry)
+		remove_proc_entry("lightsensor_status", NULL);
+//<asus-annacheng20150129><<<<<<<<<<<<<<<<<+
+
+}
+
+MODULE_AUTHOR("Templeton Tsai Dyna-Image Corporation.");
+MODULE_DESCRIPTION("AP3426 driver.");
+MODULE_LICENSE("GPL v2");
+MODULE_VERSION(DRIVER_VERSION);
+
+module_init(ap3426_init);
+module_exit(ap3426_exit);
+
+
 

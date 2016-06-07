@@ -25,7 +25,7 @@
 #include <linux/slab.h>
 #include <linux/clk.h>
 #include <linux/leds.h>
-
+#include <soc/qcom/socinfo.h>
 
 static void __iomem *msm_wcnss_base;
 static LIST_HEAD(power_on_lock_list);
@@ -139,6 +139,16 @@ static struct vregs_info pronto_vregs_pronto_v2[] = {
 	{"qcom,pronto-vddmx",  VREG_NULL_CONFIG,
 		RPM_REGULATOR_CORNER_SUPER_TURBO,  0,
 		RPM_REGULATOR_CORNER_SUPER_TURBO, 0,    NULL},
+	{"qcom,pronto-vddcx",  VREG_NULL_CONFIG, RPM_REGULATOR_CORNER_NORMAL,
+		RPM_REGULATOR_CORNER_NONE, RPM_REGULATOR_CORNER_SUPER_TURBO,
+		0,             NULL},
+	{"qcom,pronto-vddpx",  VREG_NULL_CONFIG, 1800000, 0,
+		1800000, 0,    NULL},
+};
+
+static struct vregs_info pronto_vregs_pronto_v2_8939[] = {
+	{"qcom,pronto-vddmx",  VREG_NULL_CONFIG, 1287500,  0,
+		1287500, 0,    NULL},
 	{"qcom,pronto-vddcx",  VREG_NULL_CONFIG, RPM_REGULATOR_CORNER_NORMAL,
 		RPM_REGULATOR_CORNER_NONE, RPM_REGULATOR_CORNER_SUPER_TURBO,
 		0,             NULL},
@@ -614,8 +624,14 @@ static void wcnss_iris_vregs_off(enum wcnss_hw_type hw_type,
 		break;
 	case WCNSS_PRONTO_HW:
 		if (cfg->is_pronto_vt || cfg->is_pronto_v3) {
+			if(cpu_is_msm8939()) {
+				wcnss_vregs_off(pronto_vregs_pronto_v2_8939,
+				ARRAY_SIZE(pronto_vregs_pronto_v2_8939));
+			}
+			else {		
 			wcnss_vregs_off(iris_vregs_pronto_v2,
-				ARRAY_SIZE(iris_vregs_pronto_v2));
+			ARRAY_SIZE(iris_vregs_pronto_v2));
+			}
 		} else {
 			wcnss_vregs_off(iris_vregs_pronto,
 				ARRAY_SIZE(iris_vregs_pronto));
@@ -662,8 +678,14 @@ static void wcnss_core_vregs_off(enum wcnss_hw_type hw_type,
 		break;
 	case WCNSS_PRONTO_HW:
 		if (cfg->is_pronto_vt) {
+			if(cpu_is_msm8939()) {
+			wcnss_vregs_off(pronto_vregs_pronto_v2_8939,
+				ARRAY_SIZE(pronto_vregs_pronto_v2_8939));				
+			} 
+			else {
 			wcnss_vregs_off(pronto_vregs_pronto_v2,
-				ARRAY_SIZE(pronto_vregs_pronto_v2));
+				ARRAY_SIZE(pronto_vregs_pronto_v2));				
+			}
 		} else if (cfg->is_pronto_v3) {
 			wcnss_vregs_off(pronto_vregs_pronto_v3,
 				ARRAY_SIZE(pronto_vregs_pronto_v3));
@@ -690,6 +712,10 @@ static int wcnss_core_vregs_on(struct device *dev,
 		break;
 	case WCNSS_PRONTO_HW:
 		if (cfg->is_pronto_vt) {
+			if(cpu_is_msm8939()) 
+			ret = wcnss_vregs_on(dev, pronto_vregs_pronto_v2_8939,
+					ARRAY_SIZE(pronto_vregs_pronto_v2_8939));				
+			else				
 			ret = wcnss_vregs_on(dev, pronto_vregs_pronto_v2,
 					ARRAY_SIZE(pronto_vregs_pronto_v2));
 		} else if (cfg->is_pronto_v3) {

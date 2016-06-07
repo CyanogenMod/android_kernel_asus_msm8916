@@ -44,7 +44,14 @@ const char linux_banner[] =
 	"Linux version " UTS_RELEASE " (" LINUX_COMPILE_BY "@"
 	LINUX_COMPILE_HOST ") (" LINUX_COMPILER ") " UTS_VERSION "\n";
 
+#ifdef ASUS_BUILD_KERNEL_VERSION
+const char linux_proc_banner[] =
+	"%s version %s"
+	" (" ASUS_BUILD_KERNEL_VERSION ")"
+	" (" LINUX_COMPILER ") %s\n";
+#else
 const char linux_proc_banner[] =
 	"%s version %s"
 	" (" LINUX_COMPILE_BY "@" LINUX_COMPILE_HOST ")"
 	" (" LINUX_COMPILER ") %s\n";
+#endif

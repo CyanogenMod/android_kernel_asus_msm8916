@@ -29,7 +29,7 @@
 #define CYCLES_PER_MICRO_SEC_DEFAULT 4915
 #define CCI_MAX_DELAY 1000000
 
-#define CCI_TIMEOUT msecs_to_jiffies(100)
+#define CCI_TIMEOUT msecs_to_jiffies(500)
 
 /* TODO move this somewhere else */
 #define MSM_CCI_DRV_NAME "msm_cci"
@@ -716,6 +716,7 @@ static int32_t msm_cci_init(struct v4l2_subdev *sd,
 		}
 		return 0;
 	}
+	mutex_lock(&cci_dev->cci_master_info[master].mutex);
 	ret = msm_cci_pinctrl_init(cci_dev);
 	if (ret < 0) {
 		pr_err("%s:%d Initialization of pinctrl failed\n",
@@ -784,7 +785,7 @@ static int32_t msm_cci_init(struct v4l2_subdev *sd,
 		cci_dev->base + CCI_IRQ_CLEAR_0_ADDR);
 	msm_camera_io_w_mb(0x1, cci_dev->base + CCI_IRQ_GLOBAL_CLEAR_CMD_ADDR);
 	cci_dev->cci_state = CCI_STATE_ENABLED;
-
+	mutex_unlock(&cci_dev->cci_master_info[master].mutex);
 	return 0;
 
 reset_complete_failed:
@@ -809,6 +810,7 @@ clk_enable_failed:
 	}
 request_gpio_failed:
 	cci_dev->ref_count--;
+	mutex_unlock(&cci_dev->cci_master_info[master].mutex);
 	return rc;
 }
 

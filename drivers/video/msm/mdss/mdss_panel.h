@@ -45,6 +45,11 @@ struct panel_id {
 #define LVDS_PANEL		11	/* LVDS */
 #define EDP_PANEL		12	/* LVDS */
 
+#define PANEL_TAG "<Display>"
+#define PANEL_DBG(...)  printk(KERN_DEBUG PANEL_TAG __VA_ARGS__)
+#define PANEL_FUNC PANEL_DBG("%s\n",__func__)
+
+
 static inline const char *mdss_panel2str(u32 panel)
 {
 	static const char const *names[] = {

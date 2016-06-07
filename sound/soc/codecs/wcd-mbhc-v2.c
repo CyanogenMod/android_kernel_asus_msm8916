@@ -39,8 +39,8 @@
 				  SND_JACK_BTN_4 | SND_JACK_BTN_5 | \
 				  SND_JACK_BTN_6 | SND_JACK_BTN_7)
 #define OCP_ATTEMPT 1
-#define HS_DETECT_PLUG_TIME_MS (3 * 1000)
-#define SPECIAL_HS_DETECT_TIME_MS (2 * 1000)
+#define HS_DETECT_PLUG_TIME_MS (1 * 1000)
+#define SPECIAL_HS_DETECT_TIME_MS (7 * 100)
 #define MBHC_BUTTON_PRESS_THRESHOLD_MIN 250
 #define GND_MIC_SWAP_THRESHOLD 4
 #define WCD_FAKE_REMOVAL_MIN_PERIOD_MS 100
@@ -52,6 +52,8 @@
 
 #define WCD_MBHC_BTN_PRESS_COMPL_TIMEOUT_MS  50
 
+int plug_count = 0;
+extern int g_DebugMode;
 static int det_extn_cable_en;
 module_param(det_extn_cable_en, int,
 		S_IRUGO | S_IWUSR | S_IWGRP);
@@ -941,6 +943,8 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 	bool is_pa_on = false;
 	bool micbias2 = false;
 	bool micbias1 = false;
+	int cross_conn;
+	int try = 0;
 	int ret = 0;
 	int rc;
 
@@ -959,14 +963,6 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 
 	wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_MB);
 
-
-	if (mbhc->current_plug == MBHC_PLUG_TYPE_GND_MIC_SWAP) {
-		mbhc->current_plug = MBHC_PLUG_TYPE_NONE;
-		goto correct_plug_type;
-	}
-
-	/* Enable HW FSM */
-	WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_FSM_EN, 1);
 	/*
 	 * Check for any button press interrupts before starting 3-sec
 	 * loop.
@@ -977,8 +973,21 @@ static void wcd_correct_swch_plug(struct work_struct *work)
 	WCD_MBHC_REG_READ(WCD_MBHC_BTN_RESULT, btn_result);
 	WCD_MBHC_REG_READ(WCD_MBHC_HS_COMP_RESULT, hs_comp_res);
 
+	pr_debug("%s rc = %d, btn_result = %d, hs_comp_res = %d\n", __func__, rc, btn_result, hs_comp_res);
 	if (!rc) {
 		pr_debug("%s No btn press interrupt\n", __func__);
+		if (!(hs_comp_res & 0x01)) {
+			do {
+				cross_conn = wcd_check_cross_conn(mbhc);
+				try++;
+			} while (try < GND_MIC_SWAP_THRESHOLD);
+
+			if (cross_conn > 0) {
+				pr_debug("%s: cross con found, start polling\n",__func__);
+				plug_type = MBHC_PLUG_TYPE_GND_MIC_SWAP;
+				goto correct_plug_type;
+			}
+		}
 		if (!btn_result && !hs_comp_res)
 			plug_type = MBHC_PLUG_TYPE_HEADSET;
 		else if (!btn_result && hs_comp_res)
@@ -1021,7 +1030,7 @@ correct_plug_type:
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_FSM_EN, 1);
 
 		/* allow sometime and re-check stop requested again */
-		msleep(20);
+		msleep(100);
 		if (mbhc->hs_detect_work_stop) {
 			pr_debug("%s: stop requested: %d\n", __func__,
 					mbhc->hs_detect_work_stop);
@@ -1178,10 +1187,7 @@ exit:
 static void wcd_mbhc_detect_plug_type(struct wcd_mbhc *mbhc)
 {
 	struct snd_soc_codec *codec = mbhc->codec;
-	enum wcd_mbhc_plug_type plug_type;
 	bool micbias1 = false;
-	int cross_conn;
-	int try = 0;
 
 	pr_debug("%s: enter\n", __func__);
 	WCD_MBHC_RSC_ASSERT_LOCKED(mbhc);
@@ -1198,23 +1204,6 @@ static void wcd_mbhc_detect_plug_type(struct wcd_mbhc *mbhc)
 
 	if (mbhc->mbhc_cb->mbhc_micbias_control)
 		mbhc->mbhc_cb->mbhc_micbias_control(codec, MICB_ENABLE);
-	else
-		wcd_enable_curr_micbias(mbhc, WCD_MBHC_EN_MB);
-
-	do {
-		cross_conn = wcd_check_cross_conn(mbhc);
-		try++;
-	} while (try < GND_MIC_SWAP_THRESHOLD);
-
-	if (cross_conn > 0) {
-		pr_debug("%s: cross con found, start polling\n",
-			 __func__);
-		plug_type = MBHC_PLUG_TYPE_GND_MIC_SWAP;
-		if (!mbhc->current_plug)
-			mbhc->current_plug = plug_type;
-		pr_debug("%s: Plug found, plug type is %d\n",
-			 __func__, plug_type);
-	}
 
 	/* Re-initialize button press completion object */
 	reinit_completion(&mbhc->btn_press_compl);
@@ -1229,6 +1218,12 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 	struct snd_soc_codec *codec = mbhc->codec;
 
 	dev_dbg(codec->dev, "%s: enter\n", __func__);
+
+	plug_count += 1;
+
+	if(g_DebugMode){
+		goto exit;
+	}
 
 	WCD_MBHC_RSC_LOCK(mbhc);
 
@@ -1278,6 +1273,8 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 
 		/* Remove micbias pulldown */
 		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_PULLDOWN_CTRL, 0);
+		/* Enable HW FSM */
+		WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_FSM_EN, 1);
 		/* Apply trim if needed on the device */
 		if (mbhc->mbhc_cb->trim_btn_reg)
 			mbhc->mbhc_cb->trim_btn_reg(codec);
@@ -1348,6 +1345,8 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 	mbhc->in_swch_irq_handler = false;
 	WCD_MBHC_RSC_UNLOCK(mbhc);
 	pr_debug("%s: leave\n", __func__);
+exit:
+	pr_debug("%s: Debug mode,leave\n",__func__);
 }
 
 static irqreturn_t wcd_mbhc_mech_plug_detect_irq(int irq, void *data)
@@ -1367,6 +1366,56 @@ static irqreturn_t wcd_mbhc_mech_plug_detect_irq(int irq, void *data)
 	pr_debug("%s: leave %d\n", __func__, r);
 	return r;
 }
+
+/*steve_chen ++*/
+void wcd_plug_detection_for_audio_debug(struct wcd_mbhc * mbhc,int debug_mode)
+{
+	struct snd_soc_codec *codec = mbhc->codec;
+	if(debug_mode){
+		if(mbhc->current_plug != MBHC_PLUG_TYPE_NONE){
+			printk("%s: HS is pluged in,then audio -> debug model\n",__func__);
+			plug_count = 0;
+			mbhc->mbhc_cb->lock_sleep(mbhc, true);
+			wcd_mbhc_swch_irq_handler(mbhc);
+			mbhc->mbhc_cb->lock_sleep(mbhc, false);
+		}
+		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_press_intr, false);
+		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_release_intr, false);
+		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->hph_left_ocp, false);
+		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->hph_right_ocp, false);
+	}else{
+		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_press_intr, true);
+		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_release_intr, true);
+		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->hph_left_ocp, true);
+		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->hph_right_ocp, true);
+		if(plug_count%2){
+			plug_count = 0;
+			mbhc->current_plug = MBHC_PLUG_TYPE_NONE;
+			WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_MECH_DETECTION_TYPE,1);
+			mbhc->mbhc_cb->lock_sleep(mbhc, true);
+			wcd_mbhc_swch_irq_handler(mbhc);
+			mbhc->mbhc_cb->lock_sleep(mbhc, false);
+		}
+	}
+}
+EXPORT_SYMBOL(wcd_plug_detection_for_audio_debug);
+
+#ifdef ASUS_FACTORY_BUILD
+void wcd_disable_button_event_for_factory(struct wcd_mbhc * mbhc,int button_mode)
+{
+    if(mbhc->current_plug == MBHC_PLUG_TYPE_HEADSET){
+        if(1 == button_mode){
+            mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_press_intr, false);
+            mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_release_intr, false);
+        }else if(0 == button_mode){
+            mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_press_intr,true);
+            mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_release_intr,true);
+        }
+    }
+}
+EXPORT_SYMBOL(wcd_disable_button_event_for_factory);
+#endif
+/*steve_chen --*/
 
 static int wcd_mbhc_get_button_mask(struct wcd_mbhc *mbhc)
 {

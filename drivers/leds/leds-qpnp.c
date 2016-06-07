@@ -333,6 +333,9 @@ static u8 rgb_pwm_debug_regs[] = {
 static u8 mpp_debug_regs[] = {
 	0x40, 0x41, 0x42, 0x45, 0x46, 0x4c,
 };
+static u8 mpp_debug_regs1[] = {
+	0x04, 0x05, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,  
+};
 
 static u8 kpdbl_debug_regs[] = {
 	0x40, 0x46, 0xb1, 0xb3, 0xb4, 0xe5,
@@ -541,6 +544,7 @@ struct qpnp_led_data {
 	struct work_struct	work;
 	int			id;
 	u16			base;
+	unsigned int base1;			
 	u8			reg;
 	u8			num_leds;
 	struct mutex		lock;
@@ -557,6 +561,26 @@ struct qpnp_led_data {
 };
 
 static DEFINE_MUTEX(flash_lock);
+static DEFINE_MUTEX(mutex_pwm);
+static DEFINE_MUTEX(mutex_led);
+
+//ASUS_BSP Austin_T : add LED globe variable +++
+static struct qpnp_led_data *red_led;
+static struct qpnp_led_data *green_led;
+//ASUS_BSP Austin_T : add LED globe variable ---
+
+extern bool g_Charger_mode;	//ASUS_BSP Austin_T : add charger mode trigger
+extern int asus_PRJ_ID;
+void led_clean(void)
+{
+	printk("[LED] led_clean\n");
+	red_led->cdev.brightness = 0;
+	schedule_work(&red_led->work);
+	green_led->cdev.brightness = 0;
+	schedule_work(&green_led->work);
+}
+EXPORT_SYMBOL(led_clean);
+
 static struct pwm_device *kpdbl_master;
 static u32 kpdbl_master_period_us;
 DECLARE_BITMAP(kpdbl_leds_in_use, NUM_KPDBL_LEDS);
@@ -597,11 +621,32 @@ static void qpnp_dump_regs(struct qpnp_led_data *led, u8 regs[], u8 array_size)
 					led->spmi_dev->sid,
 					led->base + regs[i],
 					&val, sizeof(val));
-		pr_debug("%s: 0x%x = 0x%x\n", led->cdev.name,
-					led->base + regs[i], val);
+		//printk("%s: 0x%x = 0x%x\n", led->cdev.name,
+		//			led->base + regs[i], val);
 	}
 	pr_debug("===== %s LED register dump end =====\n", led->cdev.name);
 }
+
+
+static void qpnp_dump_regs1(struct qpnp_led_data *led, u8 regs[], u8 array_size)
+{
+	int i;
+	u8 val;
+    led->base1 = 0x0001BC00;
+	pr_debug("===== %s LED register dump start =====\n", led->cdev.name);
+	for (i = 0; i < array_size; i++) {
+		spmi_ext_register_readl(led->spmi_dev->ctrl,
+					led->spmi_dev->sid,
+					led->base1 + regs[i],
+					&val, sizeof(val));
+		pr_debug("%s: 0x%x = 0x%x\n", led->cdev.name,
+					led->base1 + regs[i], val);
+		//printk("%s: 0x%x = 0x%x\n", led->cdev.name,
+		//			led->base1 + regs[i], val);
+	}
+	pr_debug("===== %s LED register dump end =====\n", led->cdev.name);
+}
+
 
 static int qpnp_wled_sync(struct qpnp_led_data *led)
 {
@@ -866,6 +911,8 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 	u8 val;
 	int duty_us, duty_ns, period_us;
 
+	printk("[LED] qpnp_mpp_set +++ %s\n", led->cdev.name);
+
 	if (led->cdev.brightness) {
 		if (led->mpp_cfg->mpp_reg && !led->mpp_cfg->enable) {
 			rc = regulator_set_voltage(led->mpp_cfg->mpp_reg,
@@ -875,6 +922,10 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 				dev_err(&led->spmi_dev->dev,
 					"Regulator voltage set failed rc=%d\n",
 									rc);
+				mutex_unlock(&mutex_pwm);
+				printk("[LED] mutexpwm_unlock %s\n", led->cdev.name);
+				mutex_unlock(&mutex_led);
+				printk("[LED] mutexled_unlock %s\n", led->cdev.name);
 				return rc;
 			}
 
@@ -1010,6 +1061,10 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 				dev_err(&led->spmi_dev->dev,
 					"MPP regulator disable failed(%d)\n",
 					rc);
+				mutex_unlock(&mutex_pwm);
+				printk("[LED] mutexpwm_unlock %s\n", led->cdev.name);
+				mutex_unlock(&mutex_led);
+				printk("[LED] mutexled_unlock %s\n", led->cdev.name);
 				return rc;
 			}
 
@@ -1019,6 +1074,10 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 				dev_err(&led->spmi_dev->dev,
 					"MPP regulator voltage set failed(%d)\n",
 					rc);
+				mutex_unlock(&mutex_pwm);
+				printk("[LED] mutexpwm_unlock %s\n", led->cdev.name);
+				mutex_unlock(&mutex_led);
+				printk("[LED] mutexled_unlock %s\n", led->cdev.name);
 				return rc;
 			}
 		}
@@ -1029,7 +1088,12 @@ static int qpnp_mpp_set(struct qpnp_led_data *led)
 	if (led->mpp_cfg->pwm_mode != MANUAL_MODE)
 		led->mpp_cfg->pwm_cfg->blinking = false;
 	qpnp_dump_regs(led, mpp_debug_regs, ARRAY_SIZE(mpp_debug_regs));
+	qpnp_dump_regs1(led, mpp_debug_regs1, ARRAY_SIZE(mpp_debug_regs1));  
 
+	mutex_unlock(&mutex_pwm);
+	printk("[LED] mutexpwm_unlock %s\n", led->cdev.name);
+	mutex_unlock(&mutex_led);
+	printk("[LED] mutexled_unlock %s\n", led->cdev.name);
 	return 0;
 
 err_mpp_reg_write:
@@ -1041,6 +1105,10 @@ err_reg_enable:
 							led->mpp_cfg->max_uV);
 	led->mpp_cfg->enable = false;
 
+	mutex_unlock(&mutex_pwm);
+	printk("[LED] mutexpwm_unlock %s\n", led->cdev.name);
+	mutex_unlock(&mutex_led);
+	printk("[LED] mutexled_unlock %s\n", led->cdev.name);
 	return rc;
 }
 
@@ -1801,9 +1869,18 @@ static void qpnp_led_set(struct led_classdev *led_cdev,
 {
 	struct qpnp_led_data *led;
 
+	mutex_lock(&mutex_led);
+	printk("[LED] mutexled_lock %s\n", led_cdev->name);
+	printk("[LED] qpnp_led_set %d +++ %s\n", value, led_cdev->name);  //aa
+	
 	led = container_of(led_cdev, struct qpnp_led_data, cdev);
 	if (value < LED_OFF) {
 		dev_err(&led->spmi_dev->dev, "Invalid brightness value\n");
+		
+		mutex_unlock(&mutex_pwm);
+		printk("[LED] mutexpwm_unlock %s\n", led_cdev->name);
+		mutex_unlock(&mutex_led);
+		printk("[LED] mutexled_unlock %s\n", led_cdev->name);
 		return;
 	}
 
@@ -1813,8 +1890,9 @@ static void qpnp_led_set(struct led_classdev *led_cdev,
 	led->cdev.brightness = value;
 	if (led->in_order_command_processing)
 		queue_work(led->workqueue, &led->work);
-	else
-		schedule_work(&led->work);
+	else                          
+	    schedule_work(&led->work);
+
 }
 
 static void __qpnp_led_work(struct qpnp_led_data *led,
@@ -2187,6 +2265,21 @@ static int qpnp_pwm_init(struct pwm_config_data *pwm_cfg,
 	return 0;
 }
 
+static ssize_t pwm_us_show(struct device *dev, struct device_attribute *attr,char *buf)
+{
+	struct qpnp_led_data *led;
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	struct pwm_config_data *pwm_cfg;
+	int tmp=0;
+
+	led = container_of(led_cdev, struct qpnp_led_data, cdev);
+	pwm_cfg = led->mpp_cfg->pwm_cfg;
+	tmp = pwm_cfg->pwm_period_us;
+
+	return snprintf(buf, PAGE_SIZE,"pwm_us:%d\n",tmp);
+}
+
+
 static ssize_t pwm_us_store(struct device *dev,
 	struct device_attribute *attr,
 	const char *buf, size_t count)
@@ -2203,6 +2296,9 @@ static ssize_t pwm_us_store(struct device *dev,
 	ret = kstrtou32(buf, 10, &pwm_us);
 	if (ret)
 		return ret;
+
+	mutex_lock(&mutex_pwm);
+	printk("[LED] mutexpwm_lock %s\n", led->cdev.name);
 
 	switch (led->id) {
 	case QPNP_ID_LED_MPP:
@@ -2228,7 +2324,7 @@ static ssize_t pwm_us_store(struct device *dev,
 	previous_pwm_us = pwm_cfg->pwm_period_us;
 
 	pwm_cfg->pwm_period_us = pwm_us;
-	pwm_free(pwm_cfg->pwm_dev);
+	//pwm_free(pwm_cfg->pwm_dev);    
 	ret = qpnp_pwm_init(pwm_cfg, led->spmi_dev, led->cdev.name);
 	if (ret) {
 		pwm_cfg->pwm_period_us = previous_pwm_us;
@@ -2237,6 +2333,8 @@ static ssize_t pwm_us_store(struct device *dev,
 		qpnp_led_set(&led->cdev, led->cdev.brightness);
 		dev_err(&led->spmi_dev->dev,
 			"Failed to initialize pwm with new pwm_us value\n");
+		mutex_unlock(&mutex_pwm);
+		printk("[LED] mutexpwm_unlock %s\n", led->cdev.name);
 		return ret;
 	}
 	qpnp_led_set(&led->cdev, led->cdev.brightness);
@@ -2692,7 +2790,7 @@ static ssize_t blink_store(struct device *dev,
 
 static DEVICE_ATTR(led_mode, 0664, NULL, led_mode_store);
 static DEVICE_ATTR(strobe, 0664, NULL, led_strobe_type_store);
-static DEVICE_ATTR(pwm_us, 0664, NULL, pwm_us_store);
+static DEVICE_ATTR(pwm_us, 0666, pwm_us_show, pwm_us_store);
 static DEVICE_ATTR(pause_lo, 0664, NULL, pause_lo_store);
 static DEVICE_ATTR(pause_hi, 0664, NULL, pause_hi_store);
 static DEVICE_ATTR(start_idx, 0664, NULL, start_idx_store);
@@ -2742,6 +2840,61 @@ static const struct attribute_group lpg_attr_group = {
 static const struct attribute_group blink_attr_group = {
 	.attrs = blink_attrs,
 };
+
+//ASUS BSP Austin_T : add for charger mode +++
+void led_set_charger_mode(uint8_t led_type)
+{
+
+        printk("[LED] led_set_charger_mode %d %d\n", led_type,g_Charger_mode);  //aa
+
+        if(!g_Charger_mode){
+		printk("[LED] led_set_charger_mode return %d\n", led_type);  //aa
+		return;
+	}
+			
+	if(led_type == 1)	// batery normal
+	{
+		printk("[LED] led_set_charger_mode charging %d\n", led_type);  //aa
+		
+		red_led->cdev.brightness = 255;
+		printk("[LED] red_led_brightness %d\n", red_led->cdev.brightness);  //aa
+		schedule_work(&red_led->work);
+		
+		green_led->cdev.brightness = 255;
+		printk("[LED] green_led_brightness %d\n", green_led->cdev.brightness);  //aa
+		schedule_work(&green_led->work);
+	}
+	else if(led_type == 2) // battery-full
+	{
+		printk("[LED] led_set_charger_mode full %d\n", led_type);  //aa
+		red_led->cdev.brightness = 0;
+		printk("[LED] red_led_brightness %d\n", red_led->cdev.brightness);  //aa
+		schedule_work(&red_led->work);
+		
+		green_led->cdev.brightness = 255;
+		printk("[LED] green_led_brightness %d\n", green_led->cdev.brightness);  //aa
+		schedule_work(&green_led->work);
+	}
+	else if(led_type == 3) // battery low
+	{
+		printk("[LED] led_set_charger_mode low %d\n", led_type);  //aa
+		green_led->cdev.brightness = 0;
+		printk("[LED] green_led_brightness %d\n", green_led->cdev.brightness);  //aa
+		schedule_work(&green_led->work);
+
+		red_led->cdev.brightness = 255;
+		printk("[LED] red_led_brightness %d\n", red_led->cdev.brightness);  //aa
+		schedule_work(&red_led->work);
+	}
+	else				// cable out
+	{
+		printk("[LED] led_set_charger_mode clean %d\n", led_type);  //aa
+		led_clean();
+		return;
+	}
+}
+//ASUS BSP Austin_T : add for charger mode ---
+EXPORT_SYMBOL(led_set_charger_mode);
 
 static int qpnp_flash_init(struct qpnp_led_data *led)
 {
@@ -3561,11 +3714,14 @@ bad_lpg_params:
 static int qpnp_led_get_mode(const char *mode)
 {
 	if (strncmp(mode, "manual", strlen(mode)) == 0)
-		return MANUAL_MODE;
+		{printk("[LED] qpnp_led_get_mode_manual\n");  
+		return MANUAL_MODE;}
 	else if (strncmp(mode, "pwm", strlen(mode)) == 0)
-		return PWM_MODE;
+		{printk("[LED] qpnp_led_get_mode_pwm\n");  
+		return PWM_MODE;}
 	else if (strncmp(mode, "lpg", strlen(mode)) == 0)
-		return LPG_MODE;
+		{printk("[LED] qpnp_led_get_mode_lpg\n");  
+		return LPG_MODE;}
 	else
 		return -EINVAL;
 };
@@ -3687,6 +3843,7 @@ static int qpnp_get_config_mpp(struct qpnp_led_data *led,
 	u8 led_mode;
 	const char *mode;
 
+	printk("[LED] qpnp_get_config_mpp\n");
 	led->mpp_cfg = devm_kzalloc(&led->spmi_dev->dev,
 			sizeof(struct mpp_config_data), GFP_KERNEL);
 	if (!led->mpp_cfg) {
@@ -3862,6 +4019,8 @@ static int qpnp_leds_probe(struct spmi_device *spmi)
 	const char *led_label;
 	bool regulator_probe = false;
 
+	printk("[LED] qpnp_leds_probe\n");  
+
 	node = spmi->dev.of_node;
 	if (node == NULL)
 		return -ENODEV;
@@ -3899,6 +4058,7 @@ static int qpnp_leds_probe(struct spmi_device *spmi)
 				"Failure reading label, rc = %d\n", rc);
 			goto fail_id_check;
 		}
+		printk("[LED] led_label : %s\n", led_label);
 
 		rc = of_property_read_string(temp, "linux,name",
 			&led->cdev.name);
@@ -3907,7 +4067,14 @@ static int qpnp_leds_probe(struct spmi_device *spmi)
 				"Failure reading led name, rc = %d\n", rc);
 			goto fail_id_check;
 		}
+		printk("[LED] linux,name : %s\n", led->cdev.name);
 
+		if (!strcmp(led->cdev.name, "red")) {
+			red_led = led;
+		}
+		else if (!strcmp(led->cdev.name, "green")) {
+			green_led = led;
+		}
 		rc = of_property_read_u32(temp, "qcom,max-current",
 			&led->max_current);
 		if (rc < 0) {
@@ -4121,6 +4288,16 @@ static int qpnp_leds_probe(struct spmi_device *spmi)
 		parsed_leds++;
 	}
 	dev_set_drvdata(&spmi->dev, led_array);
+	
+
+	rc = qpnp_led_masked_write(led,
+			LED_MPP_EN_CTRL(led->base), LED_MPP_EN_MASK,
+			LED_MPP_EN_DISABLE);
+	if (rc)
+		dev_err(&led->spmi_dev->dev,
+				"Failed to write led enable " \
+				 "reg\n");
+		
 	return 0;
 
 fail_id_check:

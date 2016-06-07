@@ -12,7 +12,10 @@
 #define _MMC_CORE_CORE_H
 
 #include <linux/delay.h>
-
+//* add by ASUS_BSP weixin
+#define MMC_CONFIG_SETTING_SANITIZE 0
+#define MMC_CONFIG_SETTING_PACKED 0
+//* add by ASUS_BSP weixin
 #define MMC_CMD_RETRIES        3
 
 struct mmc_bus_ops {

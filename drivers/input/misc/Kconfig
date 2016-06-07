@@ -738,6 +738,7 @@ config SENSORS_MMA_POSITION
 config SENSORS_AP3426
 	tristate "AP3426 3-in-1 digital ALPS+PS+IRLED sensor driver"
 	depends on I2C
+	default y
 	help
 	  Say Y here if you want to enable the AP3426 ALPS sensor
 	  driver.

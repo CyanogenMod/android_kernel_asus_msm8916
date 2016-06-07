@@ -420,6 +420,8 @@ enum vdd_sr2_pll_levels {
 	VDD_SR2_PLL_NUM,
 };
 
+extern char asus_lcd_id[2];
+
 static int vdd_sr2_levels[] = {
 	0,	 RPM_REGULATOR_CORNER_NONE,		/* VDD_SR2_PLL_OFF */
 	1800000, RPM_REGULATOR_CORNER_SVS_SOC,		/* VDD_SR2_PLL_SVS */
@@ -1166,6 +1168,7 @@ static struct rcg_clk jpeg0_clk_src = {
 };
 
 static struct clk_freq_tbl ftbl_gcc_camss_mclk0_1_2_clk[] = {
+	F(  19200000,	      gcc_xo,   1,	  0,	0),
 	F(  24000000,      gpll6_mclk,  1,   1,    45),
 	F(  66670000,	   gpll0_out_main,  12,	  0,	0),
 	F_END
@@ -1366,6 +1369,12 @@ static struct clk_freq_tbl ftbl_gcc_mdss_esc0_1_clk[] = {
 	F(  19200000,	      gcc_xo,   1,	  0,	0),
 	F_END
 };
+
+static struct clk_freq_tbl ftbl_gcc_mdss_esc0_1_clk_cpt[] = {
+	F(  9600000,	      gcc_xo,   2,	  0,	0),
+	F_END
+};
+
 
 static struct rcg_clk esc0_clk_src = {
 	.cmd_rcgr_reg = ESC0_CMD_RCGR,
@@ -3509,6 +3518,11 @@ static struct platform_driver msm_clock_gcc_driver = {
 
 static int __init msm_gcc_init(void)
 {
+	if(asus_lcd_id[0]=='0'){
+		printk(KERN_EMERG "[DISPLAY] %s esc 9600000 for CPT\n",__func__);
+		esc0_clk_src.freq_tbl = ftbl_gcc_mdss_esc0_1_clk_cpt;
+	}
+
 	return platform_driver_register(&msm_clock_gcc_driver);
 }
 arch_initcall(msm_gcc_init);

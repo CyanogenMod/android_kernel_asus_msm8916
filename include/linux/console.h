@@ -194,5 +194,8 @@ void vcs_remove_sysfs(int index);
 #ifdef CONFIG_VGA_CONSOLE
 extern bool vgacon_text_force(void);
 #endif
-
+//[+++][Power]Add for wakeup debug
+extern int gpio_irq_cnt, gpio_resume_irq[8], gic_irq_cnt, gic_resume_irq[8];
+extern unsigned int pm_pwrcs_ret;
+//[---][Power]Add for wakeup debug
 #endif /* _LINUX_CONSOLE_H */

@@ -112,8 +112,8 @@ static int pwm_device_request(struct pwm_device *pwm, const char *label)
 {
 	int err;
 
-	if (test_bit(PWMF_REQUESTED, &pwm->flags))
-		return -EBUSY;
+	//if (test_bit(PWMF_REQUESTED, &pwm->flags))
+	//	return -EBUSY;
 
 	if (!try_module_get(pwm->chip->ops->owner))
 		return -ENODEV;

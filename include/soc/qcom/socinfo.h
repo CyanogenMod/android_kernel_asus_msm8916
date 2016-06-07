@@ -191,6 +191,7 @@ enum pmic_model {
 };
 
 enum msm_cpu socinfo_get_msm_cpu(void);
+char* OLIVER_socinfo_get_msm_cpu_revision(void);//<OLIVER>
 uint32_t socinfo_get_id(void);
 uint32_t socinfo_get_version(void);
 uint32_t socinfo_get_raw_id(void);

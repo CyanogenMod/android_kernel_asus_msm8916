@@ -43,7 +43,16 @@
 #include <linux/msm-bus.h>
 
 #include "sdhci-pltfm.h"
-
+/*
+#ifdef pr_debug  
+#undef pr_debug  
+#define pr_debug(fmt, ...) \
+    printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)  
+#else  
+#define pr_debug(fmt, ...) \
+    printk(KERN_DEBUG pr_fmt(fmt), ##__VA_ARGS__)  
+#endif
+*/
 enum sdc_mpm_pin_state {
 	SDC_DAT1_DISABLE,
 	SDC_DAT1_ENABLE,
@@ -317,6 +326,7 @@ struct sdhci_msm_pltfm_data {
 	u32 *cpu_dma_latency_us;
 	unsigned int cpu_dma_latency_tbl_sz;
 	int status_gpio; /* card detection GPIO that is configured as IRQ */
+	int pwr_en; /* card power enable */
 	struct sdhci_msm_bus_voting_data *voting_data;
 	u32 *sup_clk_table;
 	unsigned char sup_clk_cnt;
@@ -324,6 +334,7 @@ struct sdhci_msm_pltfm_data {
 	int sdiowakeup_irq;
 	enum pm_qos_req_type cpu_affinity_type;
 	cpumask_t cpu_affinity_mask;
+	struct mmc_host  *mmc;
 };
 
 struct sdhci_msm_bus_vote {
@@ -354,6 +365,7 @@ struct sdhci_msm_host {
 	struct completion pwr_irq_completion;
 	struct sdhci_msm_bus_vote msm_bus_vote;
 	struct device_attribute	polling;
+	struct device_attribute	emmc_total_size;
 	u32 clk_rate; /* Keeps track of current clock rate that is set */
 	bool tuning_done;
 	bool calibration_done;
@@ -1675,6 +1687,7 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev,
 	int len, i, mpm_int;
 	int clk_table_len;
 	u32 *clk_table = NULL;
+	int ret = 0;
 	enum of_gpio_flags flags = OF_GPIO_ACTIVE_LOW;
 
 	pdata = devm_kzalloc(dev, sizeof(*pdata), GFP_KERNEL);
@@ -1682,7 +1695,20 @@ static struct sdhci_msm_pltfm_data *sdhci_msm_populate_pdata(struct device *dev,
 		dev_err(dev, "failed to allocate memory for platform data\n");
 		goto out;
 	}
-
+	pdata->pwr_en = of_get_named_gpio_flags(np, "cd-pwr-en", 0, &flags);
+	if (gpio_is_valid(pdata->pwr_en)) {
+                 ret = gpio_request(pdata->pwr_en, "sd_pwr_en#");
+                 if(ret){
+                         pr_debug("%s: Failed to request card power enable pin %d\n",
+                                         __func__, ret);
+                 }
+                 ret = gpio_direction_output(pdata->pwr_en, 0);
+                 if(ret){
+                         pr_debug("%s: default disable sd power %d\n",
+                                          __func__, ret);
+                 }
+         }
+	
 	pdata->status_gpio = of_get_named_gpio_flags(np, "cd-gpios", 0, &flags);
 	if (gpio_is_valid(pdata->status_gpio) & !(flags & OF_GPIO_ACTIVE_LOW))
 		pdata->caps2 |= MMC_CAP2_CD_ACTIVE_HIGH;
@@ -2167,13 +2193,27 @@ static int sdhci_msm_setup_vreg(struct sdhci_msm_pltfm_data *pdata,
 
 	vreg_table[0] = curr_slot->vdd_data;
 	vreg_table[1] = curr_slot->vdd_io_data;
-
+	pr_debug("%s: current slot name %s \n", __func__ ,mmc_hostname(pdata->mmc));
 	for (i = 0; i < ARRAY_SIZE(vreg_table); i++) {
 		if (vreg_table[i]) {
-			if (enable)
-				ret = sdhci_msm_vreg_enable(vreg_table[i]);
-			else
-				ret = sdhci_msm_vreg_disable(vreg_table[i]);
+			if(!strcmp(mmc_hostname(pdata->mmc),"mmc1") && strcmp(vreg_table[i]->name,"vdd-io")){
+				if(enable){
+					if (gpio_is_valid(pdata->pwr_en)) {
+						gpio_set_value(pdata->pwr_en, 1);
+						pr_debug("%s: enable_gpio %d\n",__func__ , gpio_get_value(pdata->pwr_en));
+					}	
+				}else{
+					if (gpio_is_valid(pdata->pwr_en)) {
+						gpio_set_value(pdata->pwr_en, 0);
+						pr_debug("%s: enable_gpio %d\n", __func__ ,gpio_get_value(pdata->pwr_en));
+					}
+				}
+			}else{
+				if (enable)
+					ret = sdhci_msm_vreg_enable(vreg_table[i]);
+				else
+					ret = sdhci_msm_vreg_disable(vreg_table[i]);
+			}
 			if (ret)
 				goto out;
 		}
@@ -2525,6 +2565,29 @@ store_sdhci_max_bus_bw(struct device *dev, struct device_attribute *attr,
 		spin_unlock_irqrestore(&host->lock, flags);
 	}
 	return count;
+}
+
+/*SDCC ATD INTERFACE*/
+/* total size is 2^n GB, e.g: 4/8/16/32/64/128 */
+static ssize_t
+show_eMMC_total_size(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+	struct sdhci_host *host = dev_get_drvdata(dev);
+	struct mmc_host *mmc;
+
+	mmc = host->mmc;
+	if (mmc->card) {
+		int i = fls(mmc->card->ext_csd.sectors);
+		if (i > 21) {
+			/* 4GB or above */
+			return snprintf(buf, PAGE_SIZE, "%d\n", (mmc->card->ext_csd.sectors >> (i - 1)) << (i - 21));
+		} else {
+			pr_err("wrong sector count");
+			return 0;
+		}
+	}
+	return 0;
 }
 
 static void sdhci_msm_check_power_status(struct sdhci_host *host, u32 req_type)
@@ -3331,7 +3394,7 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "No device tree node\n");
 		goto pltfm_free;
 	}
-
+	msm_host->pdata->mmc = host->mmc;
 	/* Setup Clocks */
 
 	/* Setup SDCC bus voter clock. */
@@ -3633,6 +3696,18 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	if (ret)
 		goto remove_host;
 
+	msm_host->emmc_total_size.show = show_eMMC_total_size;
+//	msm_host->emmc_total_size..store = NULL;
+	sysfs_attr_init(&msm_host->emmc_total_size.attr);
+	msm_host->emmc_total_size.attr.name = "emmc_total_size";
+	msm_host->emmc_total_size.attr.mode = S_IRUGO;
+	ret = device_create_file(&pdev->dev, &msm_host->emmc_total_size);
+	if (ret) {
+		pr_err("%s: %s: failed creating emmc_total_size: %d\n",
+			   mmc_hostname(host->mmc), __func__, ret);
+		device_remove_file(&pdev->dev, &msm_host->emmc_total_size);
+	}
+
 	if (!gpio_is_valid(msm_host->pdata->status_gpio)) {
 		msm_host->polling.show = show_polling;
 		msm_host->polling.store = store_polling;
@@ -3866,8 +3941,11 @@ static int sdhci_msm_suspend(struct device *dev)
 	struct sdhci_msm_host *msm_host = pltfm_host->priv;
 	int ret = 0;
 
-	if (gpio_is_valid(msm_host->pdata->status_gpio))
-		mmc_gpio_free_cd(msm_host->mmc);
+	if (gpio_is_valid(msm_host->pdata->status_gpio) && msm_host->mmc->slot.cd_irq >= 0){
+		//mmc_gpio_free_cd(msm_host->mmc);
+		//enable_irq_wake(gpio_to_irq(msm_host->pdata->status_gpio));
+		enable_irq_wake(msm_host->mmc->slot.cd_irq);
+	}
 
 	if (pm_runtime_suspended(dev)) {
 		pr_debug("%s: %s: already runtime suspended\n",
@@ -3887,12 +3965,15 @@ static int sdhci_msm_resume(struct device *dev)
 	struct sdhci_msm_host *msm_host = pltfm_host->priv;
 	int ret = 0;
 
-	if (gpio_is_valid(msm_host->pdata->status_gpio)) {
+	if (gpio_is_valid(msm_host->pdata->status_gpio) && msm_host->mmc->slot.cd_irq >= 0) {
+/*
 		ret = mmc_gpio_request_cd(msm_host->mmc,
 				msm_host->pdata->status_gpio);
 		if (ret)
 			pr_err("%s: %s: Failed to request card detection IRQ %d\n",
 					mmc_hostname(host->mmc), __func__, ret);
+*/
+		disable_irq_wake(gpio_to_irq(msm_host->pdata->status_gpio));
 	}
 
 	if (pm_runtime_suspended(dev)) {

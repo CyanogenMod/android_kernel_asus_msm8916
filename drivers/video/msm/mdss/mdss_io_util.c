@@ -232,6 +232,8 @@ int msm_dss_enable_vreg(struct dss_vreg *in_vreg, int num_vreg, int enable)
 					in_vreg[i].vreg_name);
 				goto vreg_set_opt_mode_fail;
 			}
+			//printk(KERN_DEBUG "[Display]%s enable vreg :%s \n",
+			//__func__,in_vreg[i].vreg_name);
 			rc = regulator_enable(in_vreg[i].vreg);
 			if (in_vreg[i].post_on_sleep && need_sleep)
 				msleep(in_vreg[i].post_on_sleep);
@@ -249,6 +251,8 @@ int msm_dss_enable_vreg(struct dss_vreg *in_vreg, int num_vreg, int enable)
 					msleep(in_vreg[i].pre_off_sleep);
 				regulator_set_optimum_mode(in_vreg[i].vreg,
 					in_vreg[i].disable_load);
+				//printk(KERN_DEBUG "[Display]%s disable vreg :%s \n",
+			    //     __func__,in_vreg[i].vreg_name);
 				regulator_disable(in_vreg[i].vreg);
 				if (in_vreg[i].post_off_sleep)
 					msleep(in_vreg[i].post_off_sleep);
