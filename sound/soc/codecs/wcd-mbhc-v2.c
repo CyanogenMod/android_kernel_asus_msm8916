@@ -52,8 +52,6 @@
 
 #define WCD_MBHC_BTN_PRESS_COMPL_TIMEOUT_MS  50
 
-int plug_count = 0;
-extern int g_DebugMode;
 static int det_extn_cable_en;
 module_param(det_extn_cable_en, int,
 		S_IRUGO | S_IWUSR | S_IWGRP);
@@ -1219,12 +1217,6 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 
 	dev_dbg(codec->dev, "%s: enter\n", __func__);
 
-	plug_count += 1;
-
-	if(g_DebugMode){
-		goto exit;
-	}
-
 	WCD_MBHC_RSC_LOCK(mbhc);
 
 	mbhc->in_swch_irq_handler = true;
@@ -1345,8 +1337,6 @@ static void wcd_mbhc_swch_irq_handler(struct wcd_mbhc *mbhc)
 	mbhc->in_swch_irq_handler = false;
 	WCD_MBHC_RSC_UNLOCK(mbhc);
 	pr_debug("%s: leave\n", __func__);
-exit:
-	pr_debug("%s: Debug mode,leave\n",__func__);
 }
 
 static irqreturn_t wcd_mbhc_mech_plug_detect_irq(int irq, void *data)
@@ -1366,56 +1356,6 @@ static irqreturn_t wcd_mbhc_mech_plug_detect_irq(int irq, void *data)
 	pr_debug("%s: leave %d\n", __func__, r);
 	return r;
 }
-
-/*steve_chen ++*/
-void wcd_plug_detection_for_audio_debug(struct wcd_mbhc * mbhc,int debug_mode)
-{
-	struct snd_soc_codec *codec = mbhc->codec;
-	if(debug_mode){
-		if(mbhc->current_plug != MBHC_PLUG_TYPE_NONE){
-			printk("%s: HS is pluged in,then audio -> debug model\n",__func__);
-			plug_count = 0;
-			mbhc->mbhc_cb->lock_sleep(mbhc, true);
-			wcd_mbhc_swch_irq_handler(mbhc);
-			mbhc->mbhc_cb->lock_sleep(mbhc, false);
-		}
-		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_press_intr, false);
-		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_release_intr, false);
-		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->hph_left_ocp, false);
-		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->hph_right_ocp, false);
-	}else{
-		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_press_intr, true);
-		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_release_intr, true);
-		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->hph_left_ocp, true);
-		mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->hph_right_ocp, true);
-		if(plug_count%2){
-			plug_count = 0;
-			mbhc->current_plug = MBHC_PLUG_TYPE_NONE;
-			WCD_MBHC_REG_UPDATE_BITS(WCD_MBHC_MECH_DETECTION_TYPE,1);
-			mbhc->mbhc_cb->lock_sleep(mbhc, true);
-			wcd_mbhc_swch_irq_handler(mbhc);
-			mbhc->mbhc_cb->lock_sleep(mbhc, false);
-		}
-	}
-}
-EXPORT_SYMBOL(wcd_plug_detection_for_audio_debug);
-
-#ifdef ASUS_FACTORY_BUILD
-void wcd_disable_button_event_for_factory(struct wcd_mbhc * mbhc,int button_mode)
-{
-    if(mbhc->current_plug == MBHC_PLUG_TYPE_HEADSET){
-        if(1 == button_mode){
-            mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_press_intr, false);
-            mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_release_intr, false);
-        }else if(0 == button_mode){
-            mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_press_intr,true);
-            mbhc->mbhc_cb->irq_control(codec, mbhc->intr_ids->mbhc_btn_release_intr,true);
-        }
-    }
-}
-EXPORT_SYMBOL(wcd_disable_button_event_for_factory);
-#endif
-/*steve_chen --*/
 
 static int wcd_mbhc_get_button_mask(struct wcd_mbhc *mbhc)
 {
