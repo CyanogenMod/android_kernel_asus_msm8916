@@ -834,7 +834,6 @@ static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 
 	if (ctrl->on_cmds.cmd_cnt)
 		mdss_dsi_panel_cmds_send(ctrl, &ctrl->on_cmds);
-	PANEL_FUNC;
 
 	if ( (asus_lcd_id[0]=='2') || (asus_lcd_id[0]=='3') ){
 		queue_delayed_work(cabc_enable_workqueue, &cabc_delay_work, msecs_to_jiffies(2000));
