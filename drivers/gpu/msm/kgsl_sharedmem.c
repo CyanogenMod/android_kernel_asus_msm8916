@@ -1,4 +1,4 @@
-/* Copyright (c) 2002,2007-2015, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2002,2007-2016, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -599,6 +599,10 @@ _kgsl_sharedmem_page_alloc(struct kgsl_memdesc *memdesc,
 	if (size == 0 || size > UINT_MAX)
 		return -EINVAL;
 
+	size = PAGE_ALIGN(size);
+	if (size == 0 || size > UINT_MAX)
+		return -EINVAL;
+
 	align = (memdesc->flags & KGSL_MEMALIGN_MASK) >> KGSL_MEMALIGN_SHIFT;
 
 	page_size = get_page_size(size, align);
@@ -706,6 +710,9 @@ _kgsl_sharedmem_page_alloc(struct kgsl_memdesc *memdesc,
 
 	memdesc->sglen = sglen;
 	memdesc->size = size;
+
+	if (sglen > 0)
+		sg_mark_end(&memdesc->sg[sglen - 1]);
 
 	if (sglen > 0)
 		sg_mark_end(&memdesc->sg[sglen - 1]);
