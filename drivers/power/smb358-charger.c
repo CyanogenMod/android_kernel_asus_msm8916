@@ -1368,7 +1368,6 @@ void USB_3s_retry_kicker(struct work_struct *dat){
 void USB_3s_retry_set(struct work_struct *dat){
 	int chg_type;
         int ret;
-        extern int ASUSEvtlog_Power(int);
         BAT_DBG("[SMB358]%s: +++\n", __FUNCTION__);
         ret = get_usb_charger_type(&chg_type);
                 if(ret){
@@ -1379,7 +1378,6 @@ void USB_3s_retry_set(struct work_struct *dat){
         if(chg_type == AC_IN){
                 BAT_DBG("[SMB358]%s:chg_type= %d ,3s retry sucessed, set charger to AC_IN porting\n", __FUNCTION__,chg_type);
                 setSMB358Charger(AC_IN);
-                ASUSEvtlog_Power(chg_type);
         }
 
         BAT_DBG("[SMB358]%s: ---\n", __FUNCTION__);
@@ -3089,16 +3087,6 @@ static int asus_print_all(void)
 		battInfo,
 		chargerReg);
 	BAT_DBG("%s", battInfo);
-	ASUSEvtlog("[BAT][Ser]report Capacity:%d,%d,%d,%d,%d,%s%d.%d,%d==>%d\n", batt_info.capacity,
-		batt_info.fcc,
-		batt_info.Rsoc,
-		batt_info.voltage_now,
-		batt_info.current_now,
-		batt_info.temperature_negative_sign,
-		batt_info.temperature10,
-		batt_info.temperature,
-		batt_info.cable_status,
-		batt_info.capacity);
 	//BAT_DBG("[BATT][CHARGER]Thermal_Level %d\n",Thermal_Level);
 	g_last_print_time = current_kernel_time();
 	return 0;

@@ -38,7 +38,6 @@
 #include <asm/tlbflush.h>
 
 #include <trace/events/exception.h>
-#include <linux/regulator/cpr-regulator.h> //<asus-wx20150730+>
 
 static const char *fault_name(unsigned int esr);
 
@@ -97,7 +96,6 @@ static void __do_kernel_fault(struct mm_struct *mm, unsigned long addr,
 	 * No handler, we'll have to terminate things with extreme prejudice.
 	 */
 	bust_spinlocks(1);
-	cpr_regulator_print_corner_voltage(); //<asus-wx20150730+>
 	pr_alert("Unable to handle kernel %s at virtual address %08lx\n",
 		 (addr < PAGE_SIZE) ? "NULL pointer dereference" :
 		 "paging request", addr);
@@ -464,7 +462,6 @@ asmlinkage void __exception do_mem_abort(unsigned long addr, unsigned int esr,
 	if (!inf->fn(addr, esr, regs))
 		return;
 
-	cpr_regulator_print_corner_voltage(); //<asus-wx20150730+>
 	pr_alert("Unhandled fault: %s (0x%08x) at 0x%016lx\n",
 		 inf->name, esr, addr);
 
@@ -484,7 +481,6 @@ asmlinkage void __exception do_sp_pc_abort(unsigned long addr,
 {
 	struct siginfo info;
 
-	cpr_regulator_print_corner_voltage(); //<asus-wx20150730+>
 	info.si_signo = SIGBUS;
 	info.si_errno = 0;
 	info.si_code  = BUS_ADRALN;
@@ -525,7 +521,6 @@ asmlinkage int __exception do_debug_exception(unsigned long addr,
 	if (!inf->fn(addr, esr, regs))
 		return 1;
 
-	cpr_regulator_print_corner_voltage(); //<asus-wx20150730+>
 	pr_alert("Unhandled debug exception: %s (0x%08x) at 0x%016lx\n",
 		 inf->name, esr, addr);
 

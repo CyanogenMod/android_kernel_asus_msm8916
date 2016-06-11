@@ -16,12 +16,10 @@
 #define mutex_remove_waiter(lock, waiter, ti) \
 		__list_del((waiter)->list.prev, (waiter)->list.next)
 
-extern struct task_struct	*mutex_owner_asusdebug;
 #ifdef CONFIG_SMP
 static inline void mutex_set_owner(struct mutex *lock)
 {
 	lock->owner = current;
-	lock->mutex_owner_asusdebug = current;
 }
 
 static inline void mutex_clear_owner(struct mutex *lock)
