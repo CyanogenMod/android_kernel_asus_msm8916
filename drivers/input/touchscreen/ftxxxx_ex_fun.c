@@ -2170,9 +2170,6 @@ static ssize_t ftxxxx_fwupgradeapp_store(struct device *dev, struct device_attri
 	ftxxxx_nosync_irq_disable(ftxxxx_ts->client);
 	err_tmp = fts_ctpm_fw_upgrade_with_app_file(ftxxxx_ts->client, fwname);
 
-//	if (err_tmp != 0)
-//		ASUSEvtlog("[Touch] touch update fw fail ! \n");
-
 	ftxxxx_irq_enable(ftxxxx_ts->client);
 
 	mutex_unlock(&ftxxxx_ts->g_device_mutex);

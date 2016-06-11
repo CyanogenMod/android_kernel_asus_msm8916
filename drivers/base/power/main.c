@@ -34,7 +34,6 @@
 #include "../base.h"
 #include "power.h"
 
-unsigned int pm_pwrcs_ret=0;//[Power]Add for wakeup debug
 typedef int (*pm_callback_t)(struct device *);
 
 /*
@@ -366,10 +365,6 @@ static void pm_dev_err(struct device *dev, pm_message_t state, char *info,
 {
 	printk(KERN_ERR "PM: Device %s failed to %s%s: error %d\n",
 		dev_name(dev), pm_verb(state.event), info, error);
-	//[+++]Debug for suspend and resume
-    ASUSEvtlog("PM: Device %s failed to %s%s: error %d\n",
-        dev_name(dev), pm_verb(state.event), info, error);
-	//[---]Debug for suspend and resume
 }
 
 static void dpm_show_time(ktime_t starttime, pm_message_t state, char *info)
@@ -1284,7 +1279,6 @@ int dpm_suspend(pm_message_t state)
 		if (async_error)
 			break;
 	}
-	pm_pwrcs_ret = 1;//[Power]Add for wakeup debug
 	mutex_unlock(&dpm_list_mtx);
 	async_synchronize_full();
 	if (!error)
@@ -1394,7 +1388,6 @@ int dpm_prepare(pm_message_t state)
 			list_move_tail(&dev->power.entry, &dpm_prepared_list);
 		put_device(dev);
 	}
-	pm_pwrcs_ret = 1;//[Power]Add for wakeup debug 
 	mutex_unlock(&dpm_list_mtx);
 	return error;
 }

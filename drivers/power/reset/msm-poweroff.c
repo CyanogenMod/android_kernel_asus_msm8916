@@ -31,7 +31,6 @@
 #include <soc/qcom/scm.h>
 #include <soc/qcom/restart.h>
 #include <soc/qcom/watchdog.h>
-#include <linux/asus_global.h>
 
 #define EMERGENCY_DLOAD_MAGIC1    0x322A4F99
 #define EMERGENCY_DLOAD_MAGIC2    0xC67E4350
@@ -64,15 +63,9 @@ static void *emergency_dload_mode_addr;
 static bool scm_dload_supported;
 
 static int dload_set(const char *val, struct kernel_param *kp);
-//Close download_mode in user build
-#ifdef CONFIG_USER_BUILD
-static int download_mode = 0;
-#else
 static int download_mode = 1;
-#endif
 module_param_call(download_mode, dload_set, param_get_int,
 			&download_mode, 0644);
-extern struct _asus_global asus_global;
 static int panic_prep_restart(struct notifier_block *this,
 			      unsigned long event, void *ptr)
 {
@@ -221,10 +214,6 @@ static void halt_spmi_pmic_arbiter(void)
 
 static void msm_restart_prepare(const char *cmd)
 {
-#ifdef CONFIG_MSM_DLOAD_MODE
-	ulong *printk_buffer_slot2_addr;
-#endif
-	bool is_asdf = false;
 	bool need_warm_reset = false;
 
 #ifdef CONFIG_MSM_DLOAD_MODE
@@ -266,18 +255,6 @@ static void msm_restart_prepare(const char *cmd)
 	} else {
 		qpnp_pon_system_pwr_off(PON_POWER_OFF_HARD_RESET);
 	}
-	if (cmd != NULL) {
-		if (!strncmp(cmd, "asdf", strlen("asdf"))) {
-			is_asdf = true;
-		}
-	}
-#ifdef CONFIG_MSM_DLOAD_MODE
-	if (!(in_panic || is_asdf)) {
-		// Normal reboot. Clean the printk buffer magic
-		printk_buffer_slot2_addr = (ulong *)PRINTK_BUFFER_SLOT2;
-		*printk_buffer_slot2_addr = 0;
-	}
-#endif
 
 	if (cmd != NULL) {
 		if (!strncmp(cmd, "bootloader", 10)) {
@@ -292,8 +269,6 @@ static void msm_restart_prepare(const char *cmd)
 			qpnp_pon_set_restart_reason(
 				PON_RESTART_REASON_RTC);
 			__raw_writel(0x77665503, restart_reason);
-		}else if (!strncmp(cmd, "charging", 8)){//asus bsp,reboot with charging
-			__raw_writel(0x6f656dff, restart_reason);
 		} else if (!strncmp(cmd, "oem-", 4)) {
 			unsigned long code;
 			int ret;
@@ -307,8 +282,6 @@ static void msm_restart_prepare(const char *cmd)
 			__raw_writel(0x77665501, restart_reason);
 		}
 	}
-
-	flush_cache_all();
 
 	/*outer_flush_all is not supported by 64bit kernel*/
 #ifndef CONFIG_ARM64
@@ -353,7 +326,6 @@ static void do_msm_restart(enum reboot_mode reboot_mode, const char *cmd)
 	pr_notice("Going down for restart now\n");
 
 	msm_restart_prepare(cmd);
-	flush_cache_all();
 
 #ifdef CONFIG_MSM_DLOAD_MODE
 	/*
@@ -384,9 +356,6 @@ static void do_msm_restart(enum reboot_mode reboot_mode, const char *cmd)
 void do_msm_poweroff(void)
 {
 	int ret;
-#ifdef CONFIG_MSM_DLOAD_MODE
-	ulong *printk_buffer_slot2_addr;
-#endif
 	struct scm_desc desc = {
 		.args[0] = 1,
 		.args[1] = 0,
@@ -394,19 +363,6 @@ void do_msm_poweroff(void)
 	};
 
 	pr_notice("Powering off the SoC\n");
-
-#ifdef CONFIG_MSM_DLOAD_MODE
-	// Normal power off. Clean the printk buffer magic
-	printk_buffer_slot2_addr = (ulong *)PRINTK_BUFFER_SLOT2;
-	*printk_buffer_slot2_addr = 0;
-
-	printk(KERN_CRIT "Clean asus_global...\n");
-	memset(&asus_global,0,sizeof(asus_global));
-	printk(KERN_CRIT "&asus_global = %p\n", &asus_global);
-	printk(KERN_CRIT "asus_global.asus_global_magic = 0x%x\n",asus_global.asus_global_magic);
-	printk(KERN_CRIT "asus_global.ramdump_enable_magic = 0x%x\n",asus_global.ramdump_enable_magic);
-	flush_cache_all();
-#endif
 
 #ifdef CONFIG_MSM_DLOAD_MODE
 	set_dload_mode(0);
@@ -429,7 +385,6 @@ void do_msm_poweroff(void)
 	pr_err("Powering off has failed\n");
 	return;
 }
-EXPORT_SYMBOL(do_msm_poweroff);
 
 static int msm_restart_probe(struct platform_device *pdev)
 {

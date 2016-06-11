@@ -14,7 +14,6 @@
 #include <linux/dynamic_debug.h>
 #include <asm/byteorder.h>
 #include <uapi/linux/kernel.h>
-#include <linux/asusdebug.h>
 //++++ sean_lu@asus.com add "support laser sensor 2nd source"
 extern int g_ASUS_laserID;
 //---- sean_lu@asus.com add "support laser sensor 2nd source"

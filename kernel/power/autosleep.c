@@ -5,27 +5,15 @@
  *
  * Copyright (C) 2012 Rafael J. Wysocki <rjw@sisk.pl>
  */
-#include <linux/kernel.h>
+
 #include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/pm_wakeup.h>
-//[+++]Debug for active wakelock before entering suspend
-#include <linux/switch.h>
-#include <linux/workqueue.h>
-#include <linux/module.h>
-//[---]Debug for active wakelock before entering suspend
+
 #include "power.h"
 
 static suspend_state_t autosleep_state;
 static struct workqueue_struct *autosleep_wq;
-
-//[+++]Debug for active wakelock before entering suspend
-static struct switch_dev pmsp_dev;
-struct work_struct pms_printer;
-void pmsp_print(void);
-extern bool g_resume_status;
-//[---]Debug for active wakelock before entering suspend
-
 /*
  * Note: it is only safe to mutex_lock(&autosleep_lock) if a wakeup_source
  * is active, otherwise a deadlock with try_to_suspend() is possible.
@@ -98,7 +86,6 @@ void pm_autosleep_unlock(void)
 	mutex_unlock(&autosleep_lock);
 }
 
-extern struct timer_list unattended_timer;//Debug for active wakelock before entering suspend
 int pm_autosleep_set_state(suspend_state_t state)
 {
 
@@ -117,57 +104,17 @@ int pm_autosleep_set_state(suspend_state_t state)
 
 	if (state > PM_SUSPEND_ON) {
 		pm_wakep_autosleep_enabled(true);
-		//[+++]Debug for active wakelock before entering suspend
-        g_resume_status = false;
-		//Add a timer to trigger wakelock debug
-        pr_info("[PM]unattended_timer: mod_timer (auto_sleep)\n");
-        mod_timer(&unattended_timer, jiffies + msecs_to_jiffies(PM_UNATTENDED_TIMEOUT));
-		//[---]Debug for active wakelock before entering suspend
 		queue_up_suspend_work();
 	} else {
 		pm_wakep_autosleep_enabled(false);
-		//[+++]Debug for active wakelock before entering suspend
-		//Add a timer to trigger wakelock debug
-        pr_info("[PM]unattended_timer: del_timer (late_resume)\n");
-        del_timer(&unattended_timer);
-		//[---]Debug for active wakelock before entering suspend
 	}
 
 	mutex_unlock(&autosleep_lock);
 	return 0;
 }
-//[+++]Debug for active wakelock before entering suspend
-void pmsp_print(void){
-    schedule_work(&pms_printer);
-    return;
-}
 
-EXPORT_SYMBOL(pmsp_print);
-void pms_printer_func(struct work_struct *work){
-	static int pmsp_counter = 0;
-	if(pmsp_counter % 2){
-		printk("%s:enter pmsprinter ready to send uevent 0 \n",__func__);
-		switch_set_state(&pmsp_dev,0);
-		pmsp_counter++;}
-	else{
-		printk("%s:enter pmsprinter ready to send uevent 1 \n",__func__);
-		switch_set_state(&pmsp_dev,1);
-		pmsp_counter++;}
-}
-//[---]Debug for active wakelock before entering suspend
 int __init pm_autosleep_init(void)
 {
-	//[+++]Debug for active wakelock before entering suspend
-    int ret;
-    pmsp_dev.name = "PowerManagerServicePrinter";
-    pmsp_dev.index = 0;
-    INIT_WORK(&pms_printer, pms_printer_func);
-    ret = switch_dev_register(&pmsp_dev);
-    if (ret < 0)
-        printk("%s:fail to register switch power_manager_printer \n",__func__);
-    else
-        printk("%s:success to register pmsp switch \n",__func__);
-	//[---]Debug for active wakelock before entering suspend
 	autosleep_ws = wakeup_source_register("autosleep");
 	if (!autosleep_ws)
 		return -ENOMEM;

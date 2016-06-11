@@ -266,7 +266,6 @@ int ftxxxx_i2c_Read(struct i2c_client *client, char *writebuf, int writelen, cha
 		if (IICErrorCountor >= 10) {
 			dev_err(&client->dev, "[Focal][Touch] %s: i2c read/write error over 10 times !! \n", __func__);
 			dev_err(&client->dev, "[Focal][Touch] %s: excute reset IC process !! \n", __func__);
-//			ASUSEvtlog("[Touch] touch i2c read/write error over 10 times, reset IC \n");
 			queue_work(ftxxxx_ts->reset_wq, &ftxxxx_ts->reset_ic_work);
 			return ret;
 		}
@@ -311,7 +310,6 @@ int ftxxxx_i2c_Write(struct i2c_client *client, char *writebuf, int writelen)
 		if (IICErrorCountor >= 10) {
 			dev_err(&client->dev, "[Focal][Touch] %s: i2c read/write error over 10 times !! \n", __func__);
 			dev_err(&client->dev, "[Focal][Touch] %s: excute reset IC process !! \n", __func__);
-//			ASUSEvtlog("[Touch] touch i2c read/write error over 10 times, reset IC \n");			
 			queue_work(ftxxxx_ts->reset_wq, &ftxxxx_ts->reset_ic_work);
 			return ret;
 		}
