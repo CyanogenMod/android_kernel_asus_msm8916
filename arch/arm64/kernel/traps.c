@@ -43,10 +43,6 @@
 
 #include <trace/events/exception.h>
 
-#include <linux/stacktrace.h>
-static int asus_save_stack = 0;
-static struct stack_trace *asus_strace = NULL;
-
 static const char *handler[]= {
 	"Synchronous Abort",
 	"IRQ",
@@ -100,13 +96,7 @@ static void dump_mem(const char *lvl, const char *str, unsigned long bottom,
 
 static void dump_backtrace_entry(unsigned long where, unsigned long stack)
 {
-	if (asus_save_stack && (asus_strace->max_entries > asus_strace->nr_entries))
-		asus_strace->entries[asus_strace->nr_entries++] = where;
-
-	/* only print call stack for NOT getting asus slow log */
-	if (!asus_save_stack)
-		print_ip_sym(where);
-
+	print_ip_sym(where);
 	if (in_exception_text(where))
 		dump_mem("", "Exception stack", stack,
 			 stack + sizeof(struct pt_regs));
@@ -171,8 +161,7 @@ static void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 		frame.pc = thread_saved_pc(tsk);
 	}
 
-	if (!asus_save_stack)
-		printk("Call trace:\n");
+	printk("Call trace:\n");
 	while (1) {
 		unsigned long where = frame.pc;
 		int ret;
@@ -190,19 +179,6 @@ void show_stack(struct task_struct *tsk, unsigned long *sp)
 	barrier();
 }
 
-void save_stack_trace_asus(struct task_struct *tsk, struct stack_trace *trace)
-{
-    asus_save_stack = 1;
-    asus_strace = trace;
-    dump_backtrace(NULL, tsk);
-    asus_save_stack = 0;
-}
-
-void dump_stack(void)
-{
-	dump_backtrace(NULL, NULL);
-}
-EXPORT_SYMBOL(dump_stack);
 #ifdef CONFIG_PREEMPT
 #define S_PREEMPT " PREEMPT"
 #else
@@ -250,8 +226,7 @@ static DEFINE_RAW_SPINLOCK(die_lock);
 void die(const char *str, struct pt_regs *regs, int err)
 {
 	struct thread_info *thread = current_thread_info();
-	int ret = 0;
-	char message[128]; //jack
+	int ret;
 	enum bug_trap_type bug_type = BUG_TRAP_TYPE_NONE;
 
 	oops_enter();
@@ -259,13 +234,11 @@ void die(const char *str, struct pt_regs *regs, int err)
 	raw_spin_lock_irq(&die_lock);
 	console_verbose();
 	bust_spinlocks(1);
-	if (regs != NULL) {
-		if (!user_mode(regs))
-			bug_type = report_bug(regs->pc, regs);
-		if (bug_type != BUG_TRAP_TYPE_NONE)
-			str = "Oops - BUG";
-		ret = __die(str, err, thread, regs);
-	}
+	if (!user_mode(regs))
+		bug_type = report_bug(regs->pc, regs);
+	if (bug_type != BUG_TRAP_TYPE_NONE)
+		str = "Oops - BUG";
+	ret = __die(str, err, thread, regs);
 
 	if (regs && kexec_should_crash(thread->task))
 		crash_kexec(regs);
@@ -275,14 +248,10 @@ void die(const char *str, struct pt_regs *regs, int err)
 	raw_spin_unlock_irq(&die_lock);
 	oops_exit();
 
-	if (in_interrupt()) {
-        sprintf(message, "DIE:in int %s", str); // jack
-        panic(message);
-    }
-	if (panic_on_oops) {
-        sprintf(message, "DIE :%s", str); // jack
-        panic(message);
-    }
+	if (in_interrupt())
+		panic("Fatal exception in interrupt");
+	if (panic_on_oops)
+		panic("Fatal exception");
 	if (ret != NOTIFY_STOP)
 		do_exit(SIGSEGV);
 }
