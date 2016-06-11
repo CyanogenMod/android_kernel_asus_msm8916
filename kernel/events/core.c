@@ -1357,7 +1357,6 @@ static int __perf_remove_from_context(void *info)
 	return 0;
 }
 
-
 /*
  * Remove the event from a task's (or a CPU's) list of events.
  *
@@ -6691,6 +6690,9 @@ SYSCALL_DEFINE5(perf_event_open,
 	err = perf_copy_attr(attr_uptr, &attr);
 	if (err)
 		return err;
+
+	if (attr.constraint_duplicate || attr.__reserved_1)
+		return -EINVAL;
 
 	if (!attr.exclude_kernel) {
 		if (perf_paranoid_kernel() && !capable(CAP_SYS_ADMIN))

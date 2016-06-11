@@ -294,6 +294,18 @@ static void msm_restart_prepare(const char *cmd)
 			__raw_writel(0x77665503, restart_reason);
 		}else if (!strncmp(cmd, "charging", 8)){//asus bsp,reboot with charging
 			__raw_writel(0x6f656dff, restart_reason);
+                } else if (!strcmp(cmd, "dm-verity device corrupted")) {
+                        qpnp_pon_set_restart_reason(
+                                PON_RESTART_REASON_DMVERITY_CORRUPTED);
+                        __raw_writel(0x77665508, restart_reason);
+                } else if (!strcmp(cmd, "dm-verity enforcing")) {
+                        qpnp_pon_set_restart_reason(
+                                PON_RESTART_REASON_DMVERITY_ENFORCE);
+                        __raw_writel(0x77665509, restart_reason);
+                } else if (!strcmp(cmd, "keys clear")) {
+                        qpnp_pon_set_restart_reason(
+                                PON_RESTART_REASON_KEYS_CLEAR);
+                        __raw_writel(0x7766550a, restart_reason);
 		} else if (!strncmp(cmd, "oem-", 4)) {
 			unsigned long code;
 			int ret;
