@@ -4235,7 +4235,7 @@ static int smb358_resume(struct device *dev)
 	mtNow = current_kernel_time();
 	/*BSP david: if not update for more than 180s, do report capacity*/
 	if (mtNow.tv_sec - g_last_print_time.tv_sec >= REPORT_CAPACITY_POLLING_TIME) {
-		smb358_polling_battery_data_work(3);
+		smb358_polling_battery_data_work(0);
 	}
 	
 	if (smb358_is_charging(usb_state)) {

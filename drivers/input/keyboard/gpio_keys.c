@@ -31,11 +31,6 @@
 #include <linux/spinlock.h>
 #include <linux/pinctrl/consumer.h>
 
-//ASUS BSP: workround for DoubleClickVolumeKey sometimes can't bring up panel
-#include <linux/wakelock.h>
-static struct wake_lock volume_key_wake_lock;
-//ASUS BSP: workround for DoubleClickVolumeKey sometimes can't bring up panel
-
 struct gpio_button_data {
 	const struct gpio_keys_button *button;
 	struct input_dev *input;
@@ -335,22 +330,12 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 	struct input_dev *input = bdata->input;
 	unsigned int type = button->type ?: EV_KEY;
 	int state = (gpio_get_value_cansleep(button->gpio) ? 1 : 0) ^ button->active_low;
-	printk("[Gpio_keys] %s:keycode=%d  state=%s \n",__func__,
-	              button->code,state ? "press" : "release");
+
 	if (type == EV_ABS) {
 		if (state)
 			input_event(input, type, button->code, button->value);
 	} else {
 		input_event(input, type, button->code, !!state);
-		if (state) {//ASUS BSP : workround for DoubleClickVolumeKey sometimes can't bring up panel
-			if ((button->code == KEY_VOLUMEUP) || (button->code == KEY_VOLUMEDOWN)) {
-				printk("[Gpio_keys]vol_key:%x\r\n", state);
-				if (NULL != (&(volume_key_wake_lock.ws))->name) {
-					wake_lock_timeout(&volume_key_wake_lock, 3 * HZ);
-					printk("[Gpio_keys]Wakelock 3 sec for vol_key \n");
-				}
-			}
-		}//ASUS BSP : workround for DoubleClickVolumeKey sometimes can't bring up panel
 	}
 	input_sync(input);
 }
@@ -822,16 +807,14 @@ static int gpio_keys_probe(struct platform_device *pdev)
 		goto fail2;
 	}
 
-	device_init_wakeup(&pdev->dev, wakeup);
-	wake_lock_init(&volume_key_wake_lock, WAKE_LOCK_SUSPEND, "pwr_key_lock");
-	printk(KERN_INFO "[Gpio_keys]Initialize a wakelock for gpio_key\r\n");
-
 	error = input_register_device(input);
 	if (error) {
 		dev_err(dev, "Unable to register input device, error: %d\n",
 			error);
 		goto fail3;
 	}
+
+	device_init_wakeup(&pdev->dev, wakeup);
 
 	return 0;
 
