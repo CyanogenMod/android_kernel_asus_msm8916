@@ -894,75 +894,14 @@ void get_last_shutdown_log(void)
 EXPORT_SYMBOL(get_last_shutdown_log);
 
 extern int nSuspendInProgress;
-static struct workqueue_struct *ASUSEvtlog_workQueue;
 static int g_hfileEvtlog = -MAX_ERRNO;
 static int g_bEventlogEnable = 1;
 static char g_Asus_Eventlog[ASUS_EVTLOG_MAX_ITEM][ASUS_EVTLOG_STR_MAXLEN];
 static int g_Asus_Eventlog_read = 0;
 static int g_Asus_Eventlog_write = 0;
 
-static void do_write_event_worker(struct work_struct *work);
-static DECLARE_WORK(eventLog_Work, do_write_event_worker);
-
 static struct mutex mA;
 #define AID_SDCARD_RW 1015
-static void do_write_event_worker(struct work_struct *work)
-{
-	char buffer[256];
-	memset(buffer, 0, sizeof(char)*256);
-
-	printk("[ASDF] enter %s\n",__func__);
-	if (IS_ERR((const void *)(ulong)g_hfileEvtlog)) {
-		long size;
-		g_hfileEvtlog = sys_open(ASUS_EVTLOG_PATH".txt", O_CREAT|O_RDWR|O_SYNC, 0444);
-		sys_chown(ASUS_EVTLOG_PATH".txt", AID_SDCARD_RW, AID_SDCARD_RW);
-
-		size = sys_lseek(g_hfileEvtlog, 0, SEEK_END);
-		if (size >= SZ_2M) {
-			sys_close(g_hfileEvtlog);
-			sys_rmdir(ASUS_EVTLOG_PATH"_old.txt");
-			sys_rename(ASUS_EVTLOG_PATH".txt", ASUS_EVTLOG_PATH"_old.txt");
-			g_hfileEvtlog = sys_open(ASUS_EVTLOG_PATH".txt", O_CREAT|O_RDWR|O_SYNC, 0444);
-		}
-		sprintf(buffer, "\n\n---------------System Boot----%s---------\n", ASUS_SW_VER);
-
-		sys_write(g_hfileEvtlog, buffer, strlen(buffer));
-		sys_close(g_hfileEvtlog);
-	}
-	if (!IS_ERR((const void *)(ulong)g_hfileEvtlog)) {
-		int str_len;
-		char *pchar;
-		long size;
-		g_hfileEvtlog = sys_open(ASUS_EVTLOG_PATH".txt", O_CREAT|O_RDWR|O_SYNC, 0444);
-		sys_chown(ASUS_EVTLOG_PATH".txt", AID_SDCARD_RW, AID_SDCARD_RW);
-
-		size = sys_lseek(g_hfileEvtlog, 0, SEEK_END);
-		if (size >= SZ_2M) {
-			sys_close(g_hfileEvtlog);
-			sys_rmdir(ASUS_EVTLOG_PATH"_old.txt");
-			sys_rename(ASUS_EVTLOG_PATH".txt", ASUS_EVTLOG_PATH"_old.txt");
-			g_hfileEvtlog = sys_open(ASUS_EVTLOG_PATH".txt", O_CREAT|O_RDWR|O_SYNC, 0444);
-		}
-
-		while (g_Asus_Eventlog_read != g_Asus_Eventlog_write) {
-			mutex_lock(&mA);
-			str_len = strlen(g_Asus_Eventlog[g_Asus_Eventlog_read]);
-			pchar = g_Asus_Eventlog[g_Asus_Eventlog_read];
-			g_Asus_Eventlog_read++;
-			g_Asus_Eventlog_read %= ASUS_EVTLOG_MAX_ITEM;
-			mutex_unlock(&mA);
-
-			if (pchar[str_len - 1] != '\n') {
-				pchar[str_len] = '\n';
-				pchar[str_len + 1] = '\0';
-			}
-
-			sys_write(g_hfileEvtlog, pchar, strlen(pchar));
-			sys_fsync(g_hfileEvtlog);
-		}
-		sys_close(g_hfileEvtlog);
-	}
-}
 
 extern struct timezone sys_tz;
 
@@ -999,7 +938,6 @@ void ASUSEvtlog(const char *fmt, ...)
 		vscnprintf(buffer + strlen(buffer), ASUS_EVTLOG_STR_MAXLEN - strlen(buffer), fmt, args);
 		va_end(args);
 		/*printk(buffer);*/
-		queue_work(ASUSEvtlog_workQueue, &eventLog_Work);
 	} else {
 		printk("[ASDF]ASUSEvtlog buffer cannot be allocated\n");
 	}
@@ -1200,7 +1138,6 @@ static int __init proc_asusdebug_init(void)
 	fake_mutex.name = " fake_mutex";
 	strcpy(fake_completion.name," fake_completion");
 	fake_rtmutex.owner = current;
-	ASUSEvtlog_workQueue  = create_singlethread_workqueue("ASUSEVTLOG_WORKQUEUE");
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	register_early_suspend(&asusdebug_early_suspend_handler);
