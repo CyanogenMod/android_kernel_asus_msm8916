@@ -30,12 +30,6 @@
 
 #include "power.h"
 
-//[+++]Debug for active wakelock before entering suspend
-#include <linux/wakelock.h>
-int pmsp_flag = 0;
-bool g_resume_status;
-//[---]Debug for active wakelock before entering suspend
-
 const char *const pm_states[PM_SUSPEND_MAX] = {
 	[PM_SUSPEND_FREEZE]	= "freeze",
 	[PM_SUSPEND_STANDBY]	= "standby",
@@ -253,21 +247,6 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 	return error;
 }
 
-//[+++]Debug for active wakelock before entering suspend
-extern void print_active_locks(void);
-void unattended_timer_expired(unsigned long data);
-DEFINE_TIMER(unattended_timer, unattended_timer_expired, 0, 0);
-
-void unattended_timer_expired(unsigned long data)
-{
-    pr_info("[PM]unattended_timer_expired\n");
-    ASUSEvtlog("[PM]unattended_timer_expired\n");
-    pmsp_flag=1;
-    print_active_locks();
-	mod_timer(&unattended_timer, jiffies + msecs_to_jiffies(PM_UNATTENDED_TIMEOUT));
-}
-//[---]Debug for active wakelock before entering suspend
-
 /**
  * suspend_devices_and_enter - Suspend devices and enter system sleep state.
  * @state: System sleep state to enter.
@@ -286,17 +265,12 @@ int suspend_devices_and_enter(suspend_state_t state)
 		if (error)
 			goto Close;
 	}
-	//[+++]Debug for active wakelock before entering suspend
-        pr_info("[PM]unattended_timer: del_timer\n");
-        del_timer ( &unattended_timer );
-	//[---]Debug for active wakelock before entering suspend
 	suspend_console();
 	ftrace_stop();
 	suspend_test_start();
 	error = dpm_suspend_start(PMSG_SUSPEND);
 	if (error) {
 		printk(KERN_ERR "PM: Some devices failed to suspend\n");
-		ASUSEvtlog("[PM] suspend_devices: Some devices failed to suspend\n");
 		goto Recover_platform;
 	}
 	suspend_test_finish("suspend devices");
@@ -314,11 +288,6 @@ int suspend_devices_and_enter(suspend_state_t state)
 	suspend_test_finish("resume devices");
 	ftrace_start();
 	resume_console();
-	//[+++]Debug for active wakelock before entering suspend
-        pr_info("[PM]unattended_timer: mod_timer\n");
-        mod_timer(&unattended_timer, jiffies + msecs_to_jiffies(PM_UNATTENDED_TIMEOUT));
-        g_resume_status = true;
-	//[---]Debug for active wakelock before entering suspend
  Close:
 	if (need_suspend_ops(state) && suspend_ops->end)
 		suspend_ops->end();
@@ -400,16 +369,6 @@ static void pm_suspend_marker(char *annotation)
 	pr_info("PM: suspend %s %d-%02d-%02d %02d:%02d:%02d.%09lu UTC\n",
 		annotation, tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
 		tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec);
-	//[+++]add for suspend debug 	403
-	if(annotation[1]=='n'){
-	ASUSEvtlog("[PM]request_suspend_state: (0->3)\n",
-		tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-		tm.tm_hour, tm.tm_min, tm.tm_sec);}
-	else if(annotation[1]=='x'){
-		ASUSEvtlog("[PM]request_suspend_state: (3->0)\n",
-		tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,	
-		tm.tm_hour, tm.tm_min, tm.tm_sec);}	
-	//[---]add for suspend debug 
 }
 
 //ASUS_BSP+++ Landice "[ZE500KL][USBH][Spec] Register early suspend notification for none mode switch"

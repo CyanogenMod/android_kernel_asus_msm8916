@@ -59,7 +59,6 @@
 #include "u_ctrl_hsuart.c"
 #include "u_data_hsuart.c"
 #include "f_ccid.c"
-#include "f_pclink.c"
 #include "f_mtp.c"
 #include "f_accessory.c"
 #include "f_rndis.c"
@@ -87,7 +86,6 @@ MODULE_LICENSE("GPL");
 MODULE_VERSION("1.0");
 
 static const char longname[] = "Gadget Android";
-extern struct completion gadget_init;
 
 /* Default vendor and product IDs, overridden by userspace */
 #define VENDOR_ID		0x18D1
@@ -501,10 +499,6 @@ static int android_enable(struct android_dev *dev)
 			}
 		}
 		usb_gadget_connect(cdev->gadget);
-                if(!gadget_init.done){
-                        gadget_init.done=1;
-                        complete(&gadget_init);
-                }
 	}
 
 	return err;
@@ -713,43 +707,6 @@ static void *functionfs_acquire_dev_callback(const char *dev_name)
 static void functionfs_release_dev_callback(struct ffs_data *ffs_data)
 {
 }
-
-/*-------------------------------------------------------------------------*/
-/* Supported functions initialization. Jeffrey: ASUS PCLink AP new adb, f_pclink.c */
-
-struct conn_gadget_data {
-	bool opened;
-	bool enabled;
-};
-
-static int pclink_function_init(struct android_usb_function *f,
-		struct usb_composite_dev *cdev)
-{
-	f->config = kzalloc(sizeof(struct conn_gadget_data), GFP_KERNEL);
-	if (!f->config)
-		return -ENOMEM;
-
-	return conn_gadget_setup();
-}
-
-static void pclink_function_cleanup(struct android_usb_function *f)
-{
-	conn_gadget_cleanup();
-	kfree(f->config);
-}
-
-static int pclink_function_bind_config(struct android_usb_function *f,
-		struct usb_configuration *c)
-{
-	return conn_gadget_bind_config(c);
-}
-
-static struct android_usb_function pclink_function = {
-	.name = "pclink",
-	.init = pclink_function_init,
-	.cleanup = pclink_function_cleanup,
-	.bind_config = pclink_function_bind_config,
-};
 
 /* ACM */
 static char acm_transports[32];	/*enabled ACM ports - "tty[,sdio]"*/
@@ -2080,11 +2037,11 @@ rndis_function_bind_config(struct android_usb_function *f,
 	pr_info("%s MAC: %02X:%02X:%02X:%02X:%02X:%02X\n", __func__,
 		rndis->ethaddr[0], rndis->ethaddr[1], rndis->ethaddr[2],
 		rndis->ethaddr[3], rndis->ethaddr[4], rndis->ethaddr[5]);
-/*
+
 	if (rndis->ethaddr[0])
 		dev = gether_setup_name(c->cdev->gadget, NULL, "rndis");
 	else
-*/		dev = gether_setup_name(c->cdev->gadget, rndis->ethaddr,
+		dev = gether_setup_name(c->cdev->gadget, rndis->ethaddr,
 								"rndis");
 	if (IS_ERR(dev)) {
 		ret = PTR_ERR(dev);
@@ -2457,8 +2414,7 @@ static int mass_storage_function_init(struct android_usb_function *f,
 	int err;
 	int i, n;
 	char name[FSG_MAX_LUNS][MAX_LUN_NAME];
-	//u8 uicc_nluns = dev->pdata ? dev->pdata->uicc_nluns : 0;
-	u8 uicc_nluns = 0;
+	u8 uicc_nluns = dev->pdata ? dev->pdata->uicc_nluns : 0;
 
 	config = kzalloc(sizeof(struct mass_storage_function_config),
 							GFP_KERNEL);
@@ -2892,7 +2848,6 @@ static struct android_usb_function midi_function = {
 #endif
 static struct android_usb_function *supported_functions[] = {
 	&ffs_function,
-	&pclink_function,
 	&mbim_function,
 	&ecm_qc_function,
 #ifdef CONFIG_SND_PCM

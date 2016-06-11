@@ -1772,7 +1772,6 @@ static int mapping_for_full_status(int last_soc)
 	}
 	if (!batLow) {
 		if (result == 0) {
-			ASUSEvtlog("[BAT] Low Voltage\n");
 			printk("[BAT] Low Voltage\n");
 			power_supply_changed(&the_chip->bms_psy);
 			batLow = true;

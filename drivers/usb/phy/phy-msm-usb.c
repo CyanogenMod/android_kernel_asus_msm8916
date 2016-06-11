@@ -241,38 +241,6 @@ static char *charger_event_to_str(int usb_state)
 static int g_skipped_5v;
 /* ASUS_BSP--- Landice "[ZE500KL][USBH][NA][fix] Support host charging for stress test" */
 
-//#if defined(CONFIG_ASUS_EVT_LOG)
-int ASUSEvtlog_Power(int usb_state)
-{
-        char *evt_mode_string;
-	evt_mode_string="";
-
-        switch(usb_state) {
-		case USB_IN:
-			evt_mode_string = "USB";
-			break;
-		case AC_IN:
-		case SE1_IN:
-			evt_mode_string = "ASUS AC";
-			break;
-		case UNKNOWN_IN:
-			evt_mode_string = "UNKNOWN";
-			break;
-		case CABLE_OUT:
-			evt_mode_string = "None";
-			break;
-		default:
-			evt_mode_string = NULL;
-		}
-		if (evt_mode_string != NULL){
-			ASUSEvtlog("[USB] set_chg_mode: %s\n", evt_mode_string);
-                        return 0;
-                }else
-                        return -1;
-}
-EXPORT_SYMBOL(ASUSEvtlog_Power);
-//#endif
-
 static void asus_otg_set_charger(int usb_state)
 {
        struct msm_otg *motg = the_msm_otg;
@@ -328,7 +296,6 @@ static void asus_otg_set_charger(int usb_state)
 		g_charger_state = usb_state;
 		setSMB358Charger(usb_state);
 #endif
-                ASUSEvtlog_Power(usb_state);
         }
 //BSP Ben for A68 carkit
         printk("[usb_otg] %s ---\n",__func__);

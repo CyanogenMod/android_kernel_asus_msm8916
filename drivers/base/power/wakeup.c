@@ -17,10 +17,6 @@
 #include <trace/events/power.h>
 
 #include "power.h"
-//[+++]Debug for active wakelock before entering suspend
-void print_active_locks(void);
-extern bool g_resume_status;
-//[---]Debug for active wakelock before entering suspend
 
 /*
  * If set, the suspend/hibernate code will abort transitions to a sleep state
@@ -425,17 +421,10 @@ static void wakeup_source_report_event(struct wakeup_source *ws)
  *
  * It is safe to call this function from interrupt context.
  */
- #if defined(ASUS_FACTORY_BUILD)//jevian ++
- extern unsigned char jevian_wakeup_sign;
- #endif
 void __pm_stay_awake(struct wakeup_source *ws)
 {
 	unsigned long flags;
 
-#if defined(ASUS_FACTORY_BUILD)//jevian ++
-	if(jevian_wakeup_sign && ws && strcmp(ws->name,"UsbCable_Lock_Wake") != 0)
-		return;
-#endif
 	if (!ws)
 		return;
 
@@ -749,13 +738,7 @@ bool pm_get_wakeup_count(unsigned int *count, bool block)
 			split_counters(&cnt, &inpr);
 			if (inpr == 0 || signal_pending(current))
 				break;
-			//[+++]Debug for active wakelock before entering suspend
-            if (!g_resume_status){
-				printk("[PM] try to suspend wakelock\n");
-				ASUSEvtlog("[PM] try to suspend wakelock\n");
-				print_active_locks(); 
-            }
-			//[---]Debug for active wakelock before entering suspend
+
 			schedule();
 		}
 		finish_wait(&wakeup_count_wait_queue, &wait);
@@ -891,70 +874,6 @@ static int wakeup_sources_stats_show(struct seq_file *m, void *unused)
 
 	return 0;
 }
-
-#if defined(ASUS_FACTORY_BUILD)//jevian ++
-#include <linux/wakelock.h>
-void release_wakeup_source(void)
-{
-	struct wakeup_source *ws;
-	int active = 0;
-	struct wakeup_source *last_activity_ws = NULL;
-
-	rcu_read_lock();
-	list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
-		if (ws->active && strcmp(ws->name,"UsbCable_Lock_Wake") != 0) {
-			pr_info("[factool log]release active wakeup source: %s\n", ws->name);
-			wake_unlock((struct wake_lock*)ws);
-			active = 1;
-		} else if (!active &&
-			   (!last_activity_ws ||
-			    ktime_to_ns(ws->last_time) >
-			    ktime_to_ns(last_activity_ws->last_time))) {
-			last_activity_ws = ws;
-		}
-	}
-
-	if (!active && last_activity_ws && strcmp(last_activity_ws->name,"UsbCable_Lock_Wake") != 0) {
-		pr_info("[factool log]release last active wakeup source: %s\n",
-			last_activity_ws->name);
-		wake_unlock((struct wake_lock*)last_activity_ws);
-	}
-	rcu_read_unlock();
-}
-EXPORT_SYMBOL_GPL(release_wakeup_source);
-#endif//jevian --
-
-//[+++]Debug for active wakelock before entering suspend
-extern int pmsp_flag;
-extern void pmsp_print(void);
-void print_active_locks(void)
-{
-    struct wakeup_source *ws;
-	int wl_active_cnt = 0;
-
-    //rcu_read_lock();
-    list_for_each_entry_rcu(ws, &wakeup_sources, entry)
-        if (ws->active){
-			wl_active_cnt++;
-            printk("[PM]active wake lock %s\n", ws->name);
-            ASUSEvtlog("[PM] active wake lock: %s\n", ws->name);
-            if (pmsp_flag == 1){ 
-                if(strncmp(ws->name, "PowerManagerService", strlen("PowerManagerService")) == 0)
-                pmsp_print();
-                }
-            pmsp_flag = 0;
-        }
-
-		if (wl_active_cnt == 0){
-        printk("[PM]all wakelock are inactive\n");
-        ASUSEvtlog("[PM] all wakelock are inactive\n"); 
-        }
-
-    //rcu_read_unlock();
-    return;
-}
-EXPORT_SYMBOL(print_active_locks);
-//[---]Debug for active wakelock before entering suspend
 
 static int wakeup_sources_stats_open(struct inode *inode, struct file *file)
 {

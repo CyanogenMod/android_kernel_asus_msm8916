@@ -1635,11 +1635,9 @@ struct eth_dev *gether_setup_name(struct usb_gadget *g, u8 ethaddr[ETH_ALEN],
 		dev_warn(&g->dev,
 			"using random %s ethernet address\n", "host");
 
-	if (ethaddr && is_valid_ether_addr(ethaddr)){
-		memcpy(dev->host_mac, ethaddr, ETH_ALEN);
-	}else{
+	if (ethaddr)
 		memcpy(ethaddr, dev->host_mac, ETH_ALEN);
-	}
+
 	net->netdev_ops = &eth_netdev_ops;
 
 	SET_ETHTOOL_OPS(net, &ops);
