@@ -37,7 +37,6 @@
 # include <asm/mutex.h>
 #endif
 
-extern struct mutex fake_mutex;
 /*
  * A negative mutex count indicates that waiters are sleeping waiting for the
  * mutex.
@@ -54,7 +53,6 @@ __mutex_init(struct mutex *lock, const char *name, struct lock_class_key *key)
 #ifdef CONFIG_MUTEX_SPIN_ON_OWNER
 	lock->spin_mlock = NULL;
 #endif
-	lock->name = name;
 
 	debug_mutex_init(lock, name, key);
 }
@@ -243,7 +241,7 @@ void __sched mutex_unlock(struct mutex *lock)
 	 * The unlocking fastpath is the 0->1 transition from 'locked'
 	 * into 'unlocked' state:
 	 */
-#ifndef	CONFIG_DEBUG_MUTEXES
+#ifndef CONFIG_DEBUG_MUTEXES
 	/*
 	 * When debugging is enabled we must not clear the owner before time,
 	 * the slow path will always be taken, and that clears the owner field
@@ -386,9 +384,7 @@ slowpath:
 
 		/* didn't get the lock, go to sleep: */
 		spin_unlock_mutex(&lock->wait_lock, flags);
-		task_thread_info(task)->pWaitingMutex = lock;
 		schedule_preempt_disabled();
-		task_thread_info(task)->pWaitingMutex = &fake_mutex;
 		spin_lock_mutex(&lock->wait_lock, flags);
 	}
 
