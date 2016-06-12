@@ -467,6 +467,10 @@ struct wcd_mbhc {
 	(cfg_ptr->_n_rload * \
 	(sizeof(cfg_ptr->_rload[0]) + sizeof(cfg_ptr->_alpha[0]))))
 
+void wcd_plug_detection_for_audio_debug(struct wcd_mbhc *mbhc,int debug_mode);
+#ifdef ASUS_FACTORY_BUILD
+void wcd_disable_button_event_for_factory(struct wcd_mbhc *mbhc,int button_mode);
+#endif
 #ifdef CONFIG_SND_SOC_WCD_MBHC
 int wcd_mbhc_set_keycode(struct wcd_mbhc *mbhc);
 int wcd_mbhc_start(struct wcd_mbhc *mbhc,
