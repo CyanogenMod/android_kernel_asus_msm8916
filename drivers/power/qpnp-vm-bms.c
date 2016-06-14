@@ -1784,7 +1784,7 @@ static int mapping_for_full_status(int last_soc)
 			}
 		}
 
-	/*if((result==0)&&(reported_flag==0))
+	if((result==0)&&(reported_flag==0))
 		{
 		if (the_chip->batt_psy == NULL)
 			the_chip->batt_psy = power_supply_get_by_name("battery");
@@ -1793,7 +1793,7 @@ static int mapping_for_full_status(int last_soc)
 			power_supply_changed(the_chip->batt_psy);
 			reported_flag=1;
 			}
-		}*/
+		}
 	return result;
 }
 
