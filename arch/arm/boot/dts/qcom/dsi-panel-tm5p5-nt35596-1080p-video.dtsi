@@ -86,6 +86,16 @@
                 09 01 00 00 48 00 02 00 00
                 15 01 00 00 00 00 02 4F 01
                 ];
+		cm,mdss-livedisplay-cabc-cmd = [
+			15 01 00 00 00 00 02 55 00
+		];
+		cm,mdss-livedisplay-cabc-ui-value = <0x01>;
+		cm,mdss-livedisplay-cabc-image-value = <0x02>;
+		cm,mdss-livedisplay-cabc-video-value = <0x03>;
+		cm,mdss-livedisplay-cabc-ce-value = <0x80>;
+		cm,mdss-livedisplay-post-cmd = [
+			15 01 00 00 00 00 02 29 00
+		];
 		qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
 		qcom,mdss-dsi-off-command-state = "dsi_lp_mode";
 		qcom,mdss-dsi-h-sync-pulse = <1>;
