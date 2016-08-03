@@ -78,14 +78,22 @@
 			 29 01 00 00 00 00 02 D4 04
 			 29 01 00 00 00 00 02 5E 0D
  			 29 01 00 00 64 00 02 11 00
-			 29 01 00 00 00 00 02 29 00
-			 29 01 00 00 00 00 02 53 24
 			 ];
 		qcom,mdss-dsi-off-command = [05 01 00 00 3C 00 02 28 00
 		05 01 00 00 00 00 02 10 00
                 09 01 00 00 48 00 02 00 00
                 15 01 00 00 00 00 02 4F 01
                 ];
+		cm,mdss-livedisplay-cabc-cmd = [
+			29 01 00 00 00 00 02 55 00
+		];
+		cm,mdss-livedisplay-cabc-ui-value = <0x01>;
+		cm,mdss-livedisplay-cabc-image-value = <0x02>;
+		cm,mdss-livedisplay-cabc-video-value = <0x03>;
+		cm,mdss-livedisplay-post-cmd = [
+			29 01 00 00 00 00 02 29 00
+			29 01 00 00 00 00 02 53 24
+		];
 		qcom,mdss-dsi-on-command-state = "dsi_lp_mode";
 		qcom,mdss-dsi-off-command-state = "dsi_lp_mode";
 		qcom,mdss-dsi-h-sync-pulse = <1>;
