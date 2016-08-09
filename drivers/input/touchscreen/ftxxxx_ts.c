@@ -1446,7 +1446,14 @@ static void focal_resume_work(struct work_struct *work)
 			msleep(80);
 
 			asus_check_touch_mode();
-
+			
+                   if( ftxxxx_ts->clove_status==true)
+                   	{
+                   	ftxxxx_write_reg(ftxxxx_ts->client,0xC1,0);
+		      ftxxxx_write_reg(ftxxxx_ts->client,0xC3,0);//the filp cover is open
+		      ftxxxx_ts->clove_status=false;
+                   	}
+				   
 			if (ts->glove_mode_eable == true) {
 
 				buf[0] = 0xC0;
@@ -2247,7 +2254,7 @@ static int ftxxxx_ts_probe(struct i2c_client *client, const struct i2c_device_id
 	
 
 	ftxxxx_ts->input_dev = input_dev;
-	
+	  ftxxxx_ts->clove_status=false;
 	set_bit(KEY_BACK, input_dev->keybit);
 	set_bit(KEY_HOME, input_dev->keybit);
 	set_bit(KEY_APPSELECT, input_dev->keybit);

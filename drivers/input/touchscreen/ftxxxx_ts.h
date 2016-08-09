@@ -185,6 +185,7 @@ struct ftxxxx_ts_data {
 	u8 gesture_mode_type;
 	bool reset_pin_status;
 	bool irq_lock_status;
+	bool clove_status;
 	spinlock_t irq_lock;
 	struct i2c_client *client;
 	struct input_dev *input_dev;

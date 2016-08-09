@@ -1484,11 +1484,22 @@ static ssize_t flip_cover_mode_store(struct device *dev, struct device_attribute
 	if (tmp == 0) {
 
 		ftxxxx_ts->cover_mode_states = false;
-      if ((ftxxxx_ts->dclick_mode_eable == true) ||(ftxxxx_ts->gesture_mode_eable == true))
-        {
-		ftxxxx_write_reg(ftxxxx_ts->client,0xC1,0);
-		ftxxxx_write_reg(ftxxxx_ts->client,0xC3,0);//the filp cover is open
-        }
+
+		if(ftxxxx_ts->suspend_flag ==1)
+			{
+                                    if ((ftxxxx_ts->dclick_mode_eable == true) ||(ftxxxx_ts->gesture_mode_eable == true))
+                                                {
+	                                        	ftxxxx_write_reg(ftxxxx_ts->client,0xC1,0);
+		                                      ftxxxx_write_reg(ftxxxx_ts->client,0xC3,0);//the filp cover is open
+                                                }else{
+                                                      ftxxxx_ts->clove_status=true;
+        	                                        printk("[Focal][Touch] the tp is deep sleep ! \n");
+			                                     }
+		}else{
+			ftxxxx_write_reg(ftxxxx_ts->client,0xC1,0);
+			ftxxxx_write_reg(ftxxxx_ts->client,0xC3,0);//the filp cover is open
+				
+				}
 		printk("[Focal][Touch] the filp cover is open ! \n");
 
 	} else if (tmp == 1) {
