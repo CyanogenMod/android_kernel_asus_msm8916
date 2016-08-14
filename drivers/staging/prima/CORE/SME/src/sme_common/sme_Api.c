@@ -6389,7 +6389,6 @@ VOS_STATUS sme_DbgWriteMemory(tHalHandle hHal, v_U32_t memAddr, v_U8_t *pBuf, v_
 }
 
 
-#ifdef WLAN_DEBUG
 void pmcLog(tpAniSirGlobal pMac, tANI_U32 loglevel, const char *pString, ...)
 {
     VOS_TRACE_LEVEL  vosDebugLevel;
@@ -6410,6 +6409,7 @@ void pmcLog(tpAniSirGlobal pMac, tANI_U32 loglevel, const char *pString, ...)
 
 void smsLog(tpAniSirGlobal pMac, tANI_U32 loglevel, const char *pString,...)
 {
+#ifdef WLAN_DEBUG
     // Verify against current log level
     if ( loglevel > pMac->utils.gLogDbgLevel[LOG_INDEX_FOR_MODULE( SIR_SMS_MODULE_ID )] )
         return;
@@ -6423,8 +6423,8 @@ void smsLog(tpAniSirGlobal pMac, tANI_U32 loglevel, const char *pString,...)
 
         va_end( marker );              /* Reset variable arguments.      */
     }
-}
 #endif
+}
 
 /* ---------------------------------------------------------------------------
     \fn sme_GetWcnssWlanCompiledVersion
@@ -12723,11 +12723,19 @@ eHalStatus sme_SetSignificantChange (tHalHandle hHal,
         MTRACE(vos_trace(VOS_MODULE_ID_SME,
                  TRACE_CODE_SME_TX_WDA_MSG, NO_SESSION, vosMessage.type));
         vosStatus = vos_mq_post_message(VOS_MQ_ID_WDA, &vosMessage);
-        if (!VOS_IS_STATUS_SUCCESS(vosStatus))
+        if (!VOS_IS_STATUS_SUCCESS(vosStatus)) {
+           vos_mem_free(pEXTScanSetSignificantReq);
            status = eHAL_STATUS_FAILURE;
+        }
 
         sme_ReleaseGlobalLock(&pMac->sme);
+    } else {
+        VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR, "%s: "
+                "sme_AcquireGlobalLock error", __func__);
+        vos_mem_free(pEXTScanSetSignificantReq);
+        status = eHAL_STATUS_FAILURE;
     }
+
     return(status);
 }
 
@@ -12769,10 +12777,17 @@ eHalStatus sme_ResetSignificantChange (tHalHandle hHal,
         MTRACE(vos_trace(VOS_MODULE_ID_SME,
                  TRACE_CODE_SME_TX_WDA_MSG, NO_SESSION, vosMessage.type));
         vosStatus = vos_mq_post_message(VOS_MQ_ID_WDA, &vosMessage);
-        if (!VOS_IS_STATUS_SUCCESS(vosStatus))
+        if (!VOS_IS_STATUS_SUCCESS(vosStatus)) {
+           vos_mem_free(pEXTScanResetSignificantReq);
            status = eHAL_STATUS_FAILURE;
+        }
 
         sme_ReleaseGlobalLock(&pMac->sme);
+    } else {
+        VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR, "%s: "
+                "sme_AcquireGlobalLock error", __func__);
+        vos_mem_free(pEXTScanResetSignificantReq);
+        status = eHAL_STATUS_FAILURE;
     }
     return(status);
 }
