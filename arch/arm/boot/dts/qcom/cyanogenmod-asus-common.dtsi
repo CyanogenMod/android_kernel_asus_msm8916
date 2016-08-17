@@ -37,3 +37,11 @@
 		linux,contiguous-region = <&ramoops_mem>;
 	};
 };
+
+&spmi_bus {
+	qcom,pm8916@0 {
+		pm8916_rtc: qcom,pm8916_rtc {
+			qcom,qpnp-rtc-alarm-pwrup = <1>;
+		};
+	};
+};
