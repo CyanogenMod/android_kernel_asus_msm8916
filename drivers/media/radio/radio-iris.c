@@ -5188,6 +5188,7 @@ static int iris_fops_release(struct file *file)
 				radio->fm_hdev);
 		radio->mode = FM_OFF;
 		radio->is_fm_closing = 0;
+		mutex_unlock(&radio->lock);
 	} else if (radio->mode == FM_TRANS) {
 		radio->is_fm_closing = 1;
 		radio->mode = FM_TURNING_OFF;
@@ -5195,6 +5196,7 @@ static int iris_fops_release(struct file *file)
 				radio->fm_hdev);
 		radio->mode = FM_OFF;
 		radio->is_fm_closing = 0;
+		mutex_unlock(&radio->lock);
 	} else if (radio->mode == FM_CALIB) {
 		radio->mode = FM_OFF;
 		mutex_unlock(&radio->lock);
