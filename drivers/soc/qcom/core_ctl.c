@@ -454,7 +454,7 @@ static void update_running_avg(bool trigger_update)
 {
 	int cpu;
 	struct cpu_data *pcpu;
-	int avg, iowait_avg, big_avg, old_nrrun;
+	int avg, iowait_avg, old_nrrun;
 	s64 now;
 	unsigned long flags;
 
@@ -466,7 +466,7 @@ static void update_running_avg(bool trigger_update)
 		return;
 	}
 	rq_avg_timestamp_ms = now;
-	sched_get_nr_running_avg(&avg, &iowait_avg, &big_avg);
+	sched_get_nr_running_avg(&avg, &iowait_avg);
 
 	spin_unlock_irqrestore(&state_lock, flags);
 
@@ -483,7 +483,6 @@ static void update_running_avg(bool trigger_update)
 	 * average which rounds up to 1 task.
 	 */
 	avg = (avg + NR_RUNNING_TOLERANCE) / 100;
-	big_avg = (big_avg + NR_RUNNING_TOLERANCE) / 100;
 
 	for_each_possible_cpu(cpu) {
 		pcpu = &per_cpu(cpu_state, cpu);
@@ -499,7 +498,7 @@ static void update_running_avg(bool trigger_update)
 		 * is not easy to get given core control reacts much slower
 		 * than scheduler, and can't predict scheduler's behavior.
 		 */
-		pcpu->nrrun = pcpu->is_big_cluster ? big_avg : avg;
+		pcpu->nrrun = avg;
 		if (pcpu->nrrun != old_nrrun) {
 			if (trigger_update)
 				apply_need(pcpu);
