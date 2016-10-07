@@ -832,11 +832,6 @@ static int qcedev_sha_final(struct qcedev_async_req *qcedev_areq,
 		return -EINVAL;
 	}
 
-	if (handle->sha_ctxt.trailing_buf_len == 0) {
-		pr_err("%s Incorrect trailng buffer %d\n", __func__,
-					handle->sha_ctxt.trailing_buf_len);
-		return -EINVAL;
-	}
 	handle->sha_ctxt.last_blk = 1;
 
 	total = handle->sha_ctxt.trailing_buf_len;
@@ -1254,44 +1249,6 @@ static int qcedev_vbuf_ablk_cipher(struct qcedev_async_req *areq,
 	struct qcedev_cipher_op_req *saved_req;
 	struct	qcedev_cipher_op_req *creq = &areq->cipher_op_req;
 
-	/* Verify Source Address's */
-	for (i = 0; i < areq->cipher_op_req.entries; i++)
-		if (!access_ok(VERIFY_READ,
-			(void __user *)areq->cipher_op_req.vbuf.src[i].vaddr,
-					areq->cipher_op_req.vbuf.src[i].len))
-			return -EFAULT;
-
-	/* Verify Destination Address's */
-	if (creq->in_place_op != 1) {
-		for (i = 0, total = 0; i < QCEDEV_MAX_BUFFERS; i++) {
-			if ((areq->cipher_op_req.vbuf.dst[i].vaddr != 0) &&
-						(total < creq->data_len)) {
-				if (!access_ok(VERIFY_WRITE,
-					(void __user *)creq->vbuf.dst[i].vaddr,
-						creq->vbuf.dst[i].len)) {
-					pr_err("%s:DST WR_VERIFY err %d=0x%lx\n",
-						__func__, i, (uintptr_t)
-						creq->vbuf.dst[i].vaddr);
-					return -EFAULT;
-				}
-				total += creq->vbuf.dst[i].len;
-			}
-		}
-	} else  {
-		for (i = 0, total = 0; i < creq->entries; i++) {
-			if (total < creq->data_len) {
-				if (!access_ok(VERIFY_WRITE,
-					(void __user *)creq->vbuf.src[i].vaddr,
-						creq->vbuf.src[i].len)) {
-					pr_err("%s:SRC WR_VERIFY err %d=0x%lx\n",
-						__func__, i, (uintptr_t)
-						creq->vbuf.src[i].vaddr);
-					return -EFAULT;
-				}
-				total += creq->vbuf.src[i].len;
-			}
-		}
-	}
 	total = 0;
 
 	if (areq->cipher_op_req.mode == QCEDEV_AES_MODE_CTR)
@@ -1589,6 +1546,36 @@ static int qcedev_check_cipher_params(struct qcedev_cipher_op_req *req,
 			__func__, total, req->data_len);
 		goto error;
 	}
+	/* Verify Source Address's */
+	for (i = 0, total = 0; i < req->entries; i++) {
+		if (total < req->data_len) {
+			if (!access_ok(VERIFY_READ,
+				(void __user *)req->vbuf.src[i].vaddr,
+					req->vbuf.src[i].len)) {
+					pr_err("%s:SRC RD_VERIFY err %d=0x%lx\n",
+						__func__, i, (uintptr_t)
+							req->vbuf.src[i].vaddr);
+					goto error;
+			}
+			total += req->vbuf.src[i].len;
+		}
+	}
+
+	/* Verify Destination Address's */
+	for (i = 0, total = 0; i < QCEDEV_MAX_BUFFERS; i++) {
+		if ((req->vbuf.dst[i].vaddr != 0) &&
+			(total < req->data_len)) {
+			if (!access_ok(VERIFY_WRITE,
+				(void __user *)req->vbuf.dst[i].vaddr,
+					req->vbuf.dst[i].len)) {
+					pr_err("%s:DST WR_VERIFY err %d=0x%lx\n",
+						__func__, i, (uintptr_t)
+							req->vbuf.dst[i].vaddr);
+					goto error;
+			}
+			total += req->vbuf.dst[i].len;
+		}
+	}
 	return 0;
 error:
 	return -EINVAL;
@@ -1606,10 +1593,9 @@ static int qcedev_check_sha_params(struct qcedev_sha_op_req *req,
 		pr_err("%s: CMAC not supported\n", __func__);
 		goto sha_error;
 	}
-	if ((req->entries == 0) || (req->data_len == 0) ||
-			(req->entries > QCEDEV_MAX_BUFFERS)) {
-		pr_err("%s: Invalid data length (%d)/ num entries (%d)\n",
-				__func__, req->data_len, req->entries);
+	if ((!req->entries) || (req->entries > QCEDEV_MAX_BUFFERS)) {
+		pr_err("%s: Invalid num entries (%d)\n",
+						__func__, req->entries);
 		goto sha_error;
 	}
 

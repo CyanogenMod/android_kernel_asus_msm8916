@@ -476,7 +476,6 @@ static inline int check_entry(const struct arpt_entry *e)
 
 	if (!arp_checkentry(&e->arp))
 		return -EINVAL;
-	
 
 	if (e->target_offset + sizeof(struct xt_entry_target) > e->next_offset)
 		return -EINVAL;
