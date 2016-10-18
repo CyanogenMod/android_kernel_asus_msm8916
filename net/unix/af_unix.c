@@ -426,7 +426,7 @@ static int unix_dgram_peer_wake_me(struct sock *sk, struct sock *other)
 	return 0;
 }
 
-static inline int unix_writable(struct sock *sk)
+static int unix_writable(const struct sock *sk)
 {
 	return (atomic_read(&sk->sk_wmem_alloc) << 2) <= sk->sk_sndbuf;
 }
@@ -532,7 +532,7 @@ static void unix_release_sock(struct sock *sk, int embrion)
 		}
 
 		unix_dgram_peer_wake_disconnect(sk, skpair);
-	        sock_put(skpair); /* It may now die */
+		sock_put(skpair); /* It may now die */
 		unix_peer(sk) = NULL;
 	}
 
@@ -1653,7 +1653,7 @@ restart:
 
 	sk_locked = 0;
 	unix_state_lock(other);
- restart_locked:
+restart_locked:
 	err = -EPERM;
 	if (!unix_may_send(sk, other))
 		goto out_unlock;
@@ -1726,8 +1726,8 @@ restart:
 			sk_locked = 1;
 			goto restart_locked;
 		}
- 	}
- 
+	}
+
 	if (unlikely(sk_locked))
 		unix_state_unlock(sk);
 
