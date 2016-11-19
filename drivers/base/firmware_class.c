@@ -30,7 +30,7 @@
 #include <linux/io.h>
 
 #include <generated/utsrelease.h>
-
+#include <soc/qcom/socinfo.h>
 #include "base.h"
 
 MODULE_AUTHOR("Manuel Estrada Sainz");
@@ -350,6 +350,44 @@ static bool fw_read_file_contents(struct file *file, struct firmware_buf *fw_buf
 	return true;
 }
 
+enum {
+    COUNTRY_CODE_NONE,
+    COUNTRY_CODE_NO_VOLTE,
+    COUNTRY_CODE_VOLTE
+};
+
+int country_code_type = COUNTRY_CODE_NONE;
+#define MAX_COUNTRY_CODE_BUF 4
+
+static void __apply_volte_modem_fw_path(void){
+    char buf[MAX_COUNTRY_CODE_BUF] = {0};
+    struct file *file;
+    country_code_type = COUNTRY_CODE_NO_VOLTE;
+    file = filp_open("/factory/PhoneInfodisk/country_code", O_RDONLY, 0);
+    if (IS_ERR(file)) {
+        printk(KERN_ERR "%s:can not open country_code\n", __func__);
+        return;
+    }
+    kernel_read(file, 0, buf, MAX_COUNTRY_CODE_BUF);
+    if(asus_PRJ_ID == ASUS_ZE550KL && !strncmp(asus_project_hd, "1", strlen("1")) && !strncmp(buf, "IN", 2)){
+        country_code_type = COUNTRY_CODE_VOLTE;
+         if(cpu_is_msm8916()){
+            strcpy(fw_path_para, "/etc/firmware/8916_volte_modem");
+         }else if(cpu_is_msm8939()){
+            strcpy(fw_path_para, "/etc/firmware/8939_volte_modem");
+         }else{
+            printk(KERN_ERR "%s:unknown cpu id\n", __func__);
+         }
+         printk(KERN_ERR "%s:volte_modem_path=%s\n", __func__, fw_path_para);
+    }
+    filp_close(file, NULL);
+}
+
+static void apply_volte_modem_fw_path(void){
+    if(country_code_type == COUNTRY_CODE_NONE){
+        __apply_volte_modem_fw_path();
+    }
+}
 static bool fw_get_filesystem_firmware(struct device *device,
 				       struct firmware_buf *buf,
 				       phys_addr_t dest_addr, size_t dest_size)
@@ -357,7 +395,7 @@ static bool fw_get_filesystem_firmware(struct device *device,
 	int i;
 	bool success = false;
 	char *path = __getname();
-
+        apply_volte_modem_fw_path();
 	for (i = 0; i < ARRAY_SIZE(fw_path); i++) {
 		struct file *file;
 
